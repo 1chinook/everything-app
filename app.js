@@ -343,7 +343,8 @@ function sleepPage() {
     <section class="panel page-panel">${panelHeading('Uyku planın', '', button('edit-sleep', 'Planı düzenle', 'moon'))}
       <div class="sleep-summary">${metric('moon', 'Yatma', sleep.bedtime)}${metric('sparkle', 'Uyanma', sleep.wake, 'mint')}${metric('check', 'Hedef', `${sleep.duration} saat`, 'blue')}</div>
       <p class="sleep-note">Uyanma saati, yatma saatine girdiğin süre eklenerek hesaplanır.</p>
-    </section>`;
+    </section>
+    ${sleepQuality(sleep)}`;
 }
 
 function render() {

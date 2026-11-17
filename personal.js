@@ -2,6 +2,7 @@ const relationshipKey = 'everything-app-relationship-v1';
 let relationshipEntries = readPersonal(relationshipKey, []);
 let editingRelationship;
 
+const sleepHabitsKey = 'everything-app-sleep-habits-v1';
 function readPersonal(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
 }
@@ -69,3 +70,33 @@ document.addEventListener('click', event => {
   if (editingRelationship) document.querySelector('#relationship-form input')?.focus();
 });
 
+function sleepQuality(sleep) {
+  const windDown = clockLabel((clockMinutes(sleep.bedtime) + 1410) % 1440);
+  const saved = readPersonal(sleepHabitsKey, {});
+  const habits = saved.day === activeDay() ? saved.habits : [];
+  const suggestions = [
+    ['routine', `Hafta sonu da dahil olmak üzere ${sleep.bedtime} yatış ve ${sleep.wake} kalkış düzenine yakın kal.`],
+    ['screen', `${windDown} civarında ekranları kapatıp düşük ışığa geç.`],
+    ['caffeine', 'Kahve, çay ve enerji içeceklerindeki kafeini öğleden sonraya ve akşama bırakma.'],
+    ['room', 'Odayı serin, karanlık ve sessiz tut. Yurtta gerekiyorsa göz maskesi kullan veya oda arkadaşınla sessizlik saatini konuş.'],
+    ['meal', 'Yatmaya yakın büyük öğünlerden kaçın.'],
+  ];
+  return `<section class="panel page-panel planning-panel">
+    ${panelHeading('Uyku kalitesi', 'Bu akşam uyguladıklarını işaretle. Liste her gün yenilenir.')}
+    <ul class="record-list">${suggestions.map(([id, label]) => `<li class="record-row"><label>
+      <input type="checkbox" data-sleep-habit="${id}" ${habits.includes(id) ? 'checked' : ''}><span class="row-title">${label}</span>
+    </label></li>`).join('')}</ul>
+    <p class="sleep-note"><a class="text-link" href="https://www.cdc.gov/sleep/about/" target="_blank" rel="noopener noreferrer">CDC uyku alışkanlıkları ↗</a></p>
+  </section>`;
+}
+
+document.addEventListener('change', event => {
+  const habit = event.target.dataset.sleepHabit;
+  if (!habit) return;
+  const day = activeDay();
+  const saved = readPersonal(sleepHabitsKey, {});
+  const habits = new Set(saved.day === day ? saved.habits : []);
+  if (event.target.checked) habits.add(habit);
+  else habits.delete(habit);
+  writePersonal(sleepHabitsKey, { day, habits: [...habits] });
+});
