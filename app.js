@@ -5,6 +5,7 @@ const icons = {
   chart: '<path d="M3 3v17h18M7 15v-3m5 3V8m5 7V5"/>',
   file: '<path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10Z"/><path d="M13 3v7h7M8 14h8m-8 3h6"/>',
   moon: '<path d="M20.9 13.3A9 9 0 0 1 10.7 3.1 9 9 0 1 0 20.9 13.3Z"/>',
+  heart: '<path d="M20.8 8.6c0 4.4-8.8 10.7-8.8 10.7S3.2 13 3.2 8.6a4.5 4.5 0 0 1 8.8-1.4 4.5 4.5 0 0 1 8.8 1.4Z"/>',
   dumbbell: '<path d="M7 12h10m-14 0h1m16 0h1"/><rect x="4" y="7" width="3" height="10" rx="1"/><rect x="17" y="7" width="3" height="10" rx="1"/>',
   timer: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6m3 4 2-2"/>',
   sync: '<path d="M20 9a8 8 0 0 0-14-3L3 9m0-5v5h5m-4 6a8 8 0 0 0 14 3l3-3m0 5v-5h-5"/>',
@@ -29,6 +30,7 @@ const pages = {
   calisma: 'Çalışma programı',
   dokumanlar: 'Dokümanlar',
   uyku: 'Uyku',
+  iliski: 'Kız arkadaş',
   spor: 'Spor',
   odak: 'Odak',
   hafta: 'Haftalık özet',
@@ -345,7 +347,7 @@ function sleepPage() {
 }
 
 function render() {
-  const views = { bugun: dashboard, dersler: coursesPage, program, takvim: assessmentsPage, notlar: grades, calisma: studyProgramPage, dokumanlar: documents, uyku: sleepPage, spor: sports, odak: focusPage, hafta: weeklyPage, kesfet: discoverPage, esitle: syncPage };
+  const views = { bugun: dashboard, dersler: coursesPage, program, takvim: assessmentsPage, notlar: grades, calisma: studyProgramPage, dokumanlar: documents, uyku: sleepPage, iliski: relationshipPage, spor: sports, odak: focusPage, hafta: weeklyPage, kesfet: discoverPage, esitle: syncPage };
   const requested = location.hash.slice(1);
   const page = Object.hasOwn(views, requested) ? requested : 'bugun';
   const label = pages[page];

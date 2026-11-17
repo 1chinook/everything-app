@@ -20,6 +20,7 @@ const assets = new Map([
   ['/sync.js', ['sync.js', 'text/javascript']],
   ['/fitness.js', ['fitness.js', 'text/javascript']],
   ['/discover.js', ['discover.js', 'text/javascript']],
+  ['/personal.js', ['personal.js', 'text/javascript']],
 ]);
 const maxPayload = 4 * 1024 * 1024;
 
