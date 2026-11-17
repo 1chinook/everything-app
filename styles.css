@@ -14,7 +14,7 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 body { margin: 0; min-width: 300px; }
-button, input, select { font: inherit; }
+button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 a { color: inherit; text-decoration: none; }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
@@ -38,6 +38,8 @@ svg { width: 18px; height: 18px; display: block; flex-shrink: 0; }
 .profile small { color: var(--muted); margin-top: 4px; font-size: 11px; }
 .workspace { min-width: 0; }
 .topbar { min-height: 71px; padding: 12px clamp(20px, 3.15vw, 49px); display: flex; justify-content: space-between; align-items: center; gap: 12px; border-bottom: 1px solid #242633; background: #13141d; }
+.topbar-actions, .week-actions { display: flex; gap: 7px; flex-wrap: wrap; }
+.navigation { overflow-y: auto; }
 .breadcrumb { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 10px; }
 .breadcrumb svg { width: 13px; height: 13px; }
 .breadcrumb strong { color: #e6e3f1; font-weight: 600; }
@@ -104,6 +106,7 @@ h1 { font-size: clamp(30px, 3.45vw, 44px); line-height: 1.1; font-weight: 750; l
 .pill { background: #242638; color: #bbb9d0; font-size: 10px; font-weight: 600; border-radius: 20px; padding: 4px 7px; white-space: nowrap; }
 .pill.urgent { background: #472c3e; color: #ffb3cd; }
 .pill.mint { background: #203a37; color: #9ae6ce; }
+.pill.sport { background: #243b49; color: #a3dbea; }
 .task-row, .record-row { min-height: 50px; display: flex; align-items: center; gap: 8px; border-top: 1px solid #282b3a; padding: 8px 0; }
 .task-row label { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; cursor: pointer; }
 .task-row input, .record-row input { margin: 0; flex: none; height: 15px; width: 15px; accent-color: #9a7aef; }
@@ -129,9 +132,46 @@ dialog::backdrop { background: #090a12bd; }
 .editor-actions .danger { margin-right: auto; }
 .editor-actions .danger[hidden] { display: none; }
 .form-fields { display: grid; gap: 12px; padding: 17px 0; }
+.assessment-numbers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .time-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.suggestion { display: flex; align-items: center; gap: 10px; }
+.suggestion small { margin: 0; line-height: 1.4; }
+.preference summary { color: var(--accent); cursor: pointer; font-size: 12px; }
+.preference .time-fields { margin-top: 8px; }
 .field { display: grid; gap: 6px; font-size: 13px; color: #d6d3e6; }
-.field input, .field select { min-width: 0; width: 100%; color: #fff; background: #11131e; border: 1px solid #393b51; padding: 9px; border-radius: 7px; }
+.field input, .field select, .field textarea { min-width: 0; width: 100%; color: #fff; background: #11131e; border: 1px solid #393b51; padding: 9px; border-radius: 7px; }
+.field textarea { resize: vertical; }
+.form-feedback { color: var(--muted); margin: 0 0 12px; font-size: 12px; line-height: 1.45; }
+.form-feedback:empty { display: none; }
+.planning-panel { margin-top: 15px; }
+.course-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.course-card summary { display: flex; align-items: center; gap: 10px; padding: 13px; cursor: pointer; list-style: none; }
+.course-card summary::-webkit-details-marker { display: none; }
+.course-card summary > span:nth-child(2) { flex: 1; min-width: 0; }
+.course-card summary strong { display: block; font-size: 14px; }
+.course-card summary small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.passing-line, .course-card summary .passing-line { display: block; margin: 6px 0 2px; color: #79e5ca; font-size: 12px; font-weight: 700; line-height: 1.45; }
+.hero-copy .passing-line { margin: -4px 0 12px; }
+.course-card[open] summary > [data-icon="chevron-right"] { transform: rotate(90deg); }
+.course-card-body { padding: 0 13px 14px; font-size: 13px; line-height: 1.5; }
+.course-card-body ol { padding-left: 21px; margin: 0 0 12px; color: var(--muted); }
+.course-card-body li + li { margin-top: 4px; }
+.topic-choices { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 5px; }
+.topic-choices .button { justify-content: flex-start; text-align: left; white-space: normal; width: 100%; }
+.planning-row .button, .schedule-row .button { min-height: 30px; padding: 5px 8px; }
+.planning-row .pill.urgent { max-width: 40%; white-space: normal; text-align: center; }
+.proposal-list { display: grid; gap: 7px; max-height: 45vh; overflow: auto; padding: 0; list-style: none; margin: 0; }
+.proposal-list li { display: grid; gap: 4px; padding: 10px; background: #202230; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+.proposal-list span { color: var(--muted); font-size: 11px; }
+.focus-clock { display: grid; justify-items: center; gap: 14px; padding: 14px 20px 27px; }
+.focus-clock > strong { font-size: clamp(44px, 12vw, 80px); font-variant-numeric: tabular-nums; letter-spacing: -.06em; }
+button:disabled { opacity: .55; cursor: default; }
+.sync-content { padding: 0 17px 17px; }
+.sync-steps { margin: 3px 0 14px; padding-left: 19px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.sync-steps code { color: var(--accent); }
+.sync-form { display: grid; gap: 10px; margin-bottom: 12px; }
+.sync-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+#sync-status { margin-bottom: 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 @media (max-width: 1040px) {
@@ -153,7 +193,12 @@ dialog::backdrop { background: #090a12bd; }
 }
 
 @media (max-width: 540px) {
+  .course-grid { grid-template-columns: 1fr; }
   .content, .topbar { padding-inline: 13px; }
+  .breadcrumb > span { display: none; }
+  .topbar-actions { justify-content: end; }
+  .topbar-actions .button { padding-inline: 8px; }
+  .planning-row > .tile-icon { display: none; }
   .intro { align-items: start; margin-bottom: 16px; }
   .intro p:last-child:not(.date) { font-size: 12px; }
   .day-controls { margin-top: 2px; }

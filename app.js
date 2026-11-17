@@ -5,6 +5,9 @@ const icons = {
   chart: '<path d="M3 3v17h18M7 15v-3m5 3V8m5 7V5"/>',
   file: '<path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10Z"/><path d="M13 3v7h7M8 14h8m-8 3h6"/>',
   moon: '<path d="M20.9 13.3A9 9 0 0 1 10.7 3.1 9 9 0 1 0 20.9 13.3Z"/>',
+  dumbbell: '<path d="M7 12h10m-14 0h1m16 0h1"/><rect x="4" y="7" width="3" height="10" rx="1"/><rect x="17" y="7" width="3" height="10" rx="1"/>',
+  timer: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6m3 4 2-2"/>',
+  sync: '<path d="M20 9a8 8 0 0 0-14-3L3 9m0-5v5h5m-4 6a8 8 0 0 0 14 3l3-3m0 5v-5h-5"/>',
   compass: '<circle cx="12" cy="12" r="9"/><path d="m16 8-2 6-6 2 2-6 6-2Z"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   'chevron-right': '<path d="m9 6 6 6-6 6"/>',
@@ -19,10 +22,17 @@ const icons = {
 
 const pages = {
   bugun: 'Bugün',
+  dersler: 'Derslerim',
   program: 'Ders programı',
+  takvim: 'Sınav ve teslimler',
   notlar: 'Notlar',
+  calisma: 'Çalışma programı',
   dokumanlar: 'Dokümanlar',
   uyku: 'Uyku',
+  spor: 'Spor',
+  odak: 'Odak',
+  hafta: 'Haftalık özet',
+  esitle: 'Eşitleme',
   kesfet: 'Keşfet',
 };
 
@@ -52,6 +62,10 @@ const examples = {
 
 const storageKey = 'everything-app-preview-v1';
 const state = readState();
+state.assessments ??= [];
+state.targets ??= {};
+state.focusLogs ??= [];
+state.courseTopics ??= {};
 const content = document.querySelector('#content');
 const dialog = document.querySelector('#editor');
 const form = document.querySelector('#editor-form');
@@ -59,19 +73,27 @@ const status = document.querySelector('#status');
 
 function readState() {
   try {
-    return JSON.parse(localStorage.getItem(storageKey)) ?? examples;
+    return withoutDemoRecords(JSON.parse(localStorage.getItem(storageKey)) ?? examples);
   } catch {
-    return examples;
+    return withoutDemoRecords(examples);
   }
 }
 
-function save(message) {
+function withoutDemoRecords(data) {
+  const realRecords = (key) => data[key].filter(record => !examples[key].some(sample =>
+    Object.keys(record).length === Object.keys(sample).length &&
+    Object.entries(sample).every(([field, value]) => field === 'day' || record[field] === value)));
+  return { ...data, events: realRecords('events'), tasks: realRecords('tasks'), grades: realRecords('grades') };
+}
+
+function save(message, synchronize = true) {
   try {
     localStorage.setItem(storageKey, JSON.stringify(state));
     status.textContent = message;
   } catch {
     status.textContent = 'Değişiklik bu oturumda geçerli. Tarayıcı kaydı yapılamadı.';
   }
+  if (synchronize) noteSyncChange();
 }
 
 function icon(name, extra = '') {
@@ -126,10 +148,10 @@ function occursOn(event, day) {
   return day >= event.day && weekday(day) === weekday(event.day);
 }
 
-function eventsForDay() {
+function eventsForDay(day = selectedDay) {
   return state.events
-    .filter(event => occursOn(event, selectedDay))
-    .map(event => ({ ...event, attending: event.attendance?.[selectedDay] ?? event.attending }))
+    .filter(event => occursOn(event, day))
+    .map(event => ({ ...event, attending: event.attendance?.[day] ?? event.attending, done: event.completion?.[day] ?? false }))
     .sort((a, b) => a.time.localeCompare(b.time));
 }
 
@@ -154,6 +176,9 @@ function eventTime(event) {
 }
 
 function attendancePill(event) {
+  if (event.kind === 'workout') {
+    return event.done ? '<span class="pill mint">Tamamlandı</span>' : '<span class="pill sport">Antrenman</span>';
+  }
   const label = event.kind === 'study' ? 'Çalışma' : event.attending ? 'Katılacağım' : 'Katılmayacağım';
   return `<span class="pill ${event.attending ? 'mint' : ''}">${label}</span>`;
 }
@@ -178,9 +203,10 @@ function schedule(events) {
   return `<ul class="schedule">${events.map(event => `
     <li class="schedule-row">
       <time datetime="${event.time}">${event.time}</time>
-      <span class="schedule-mark ${event.kind === 'study' ? 'blue' : ''}"></span>
-      <div><div class="row-title">${escapeText(event.title)}</div><small class="row-meta">${escapeText(event.detail)}${event.endTime ? ` · ${event.endTime}’e kadar` : ''}</small></div>
-      ${attendancePill(event)}
+      <span class="schedule-mark ${({ study: 'blue', workout: 'mint' })[event.kind] ?? ''}"></span>
+      <div><div class="row-title">${escapeText(event.title)}</div><small class="row-meta">${escapeText(event.detail)}${event.endTime ? ` · ${event.endTime}’e kadar` : ''}</small>
+      ${event.focusPlan ? `<small class="row-meta">${studyGuide(event)}</small>` : ''}</div>
+      ${isPlannedStudy(event) ? studyControls(event) : attendancePill(event)}
     </li>`).join('')}</ul>`;
 }
 
@@ -188,7 +214,10 @@ function tasksList(tasks) {
   if (!tasks.length) return empty('Bu gün için görev yok.');
   return `<ul class="task-list">${tasks.map(task => `
     <li class="task-row">
-      <label><input type="checkbox" data-task="${task.id}" ${task.done ? 'checked' : ''}><span class="row-title">${escapeText(task.title)}</span></label>
+      <label><input type="checkbox" data-task="${task.id}" ${task.done ? 'checked' : ''}><span>
+        <span class="row-title">${escapeText(task.title)}</span>
+        ${task.course || task.dueTime ? `<small class="row-meta">${[task.course, task.dueTime].filter(Boolean).map(escapeText).join(' · ')}</small>` : ''}
+      </span></label>
       ${task.priority === 'Öncelikli' ? '<span class="pill urgent">Öncelikli</span>' : ''}
       ${editButton('task', task)}
     </li>`).join('')}</ul>`;
@@ -203,18 +232,20 @@ function sleepTimes() {
 
 function dashboard() {
   const events = eventsForDay();
-  const tasks = state.tasks.filter(task => task.day === selectedDay);
+  const tasks = state.tasks.filter(task => task.day === selectedDay)
+    .sort((a, b) => (a.dueTime || '24:00').localeCompare(b.dueTime || '24:00'));
   const attending = events.filter(event => event.kind === 'lesson' && event.attending);
   const doneCount = tasks.filter(task => task.done).length;
-  const focus = [...state.grades].sort((a, b) => a.value - b.value)[0];
+  const focus = coursePriorities().find(course => course.observed !== null && course.level > 0);
   const sleep = sleepTimes();
   return `${intro(selectedDay === today ? 'Merhaba, Yusuf.' : 'Günün planı', 'Derslerin, görevlerin ve uyku planın bir arada.', true)}
     <section class="hero" aria-labelledby="focus-title">
       <div class="hero-copy">
         <div class="hero-label">${icon('sparkle')}ÇALIŞMA ÖNCELİĞİ</div>
-        <h2 id="focus-title">${focus ? escapeText(focus.title) : 'Henüz not eklenmedi'}</h2>
-        <p>${focus ? `Girilen en düşük not · ${focus.value}/100` : 'Bir ders notu ekleyerek çalışma önceliğini gör.'}</p>
-        <a href="#notlar" class="button secondary">Notları incele ${icon('arrow')}</a>
+        <h2 id="focus-title">${focus ? escapeText(focus.title) : 'Haftalık çalışma planın'}</h2>
+        <p>${focus ? escapeText(focus.reason) : 'Notlarını ve yaklaşan sınavlarını kullanarak derslerine süre ayır.'}</p>
+        ${passingLine(focus?.passing)}
+        <a href="#calisma" class="button secondary">Çalışma programına git ${icon('arrow')}</a>
       </div>
       <div class="orbit" aria-hidden="true"><div class="ring"></div><div class="ring"></div><div class="ring"></div><div class="orbit-core">${icon('sparkle')}</div><i class="orbit-dot"></i><i class="orbit-dot"></i></div>
     </section>
@@ -232,11 +263,12 @@ function dashboard() {
         ${panelHeading('Görevler', '', '<button type="button" class="icon-button" data-action="add-task" aria-label="Görev ekle">' + icon('plus') + '</button>')}
         ${tasksList(tasks)}
       </section>
-    </div>`;
+    </div>
+    ${dashboardPlanning()}`;
 }
 
 function program() {
-  const events = eventsForDay();
+  const events = eventsForDay().filter(event => event.kind !== 'workout');
   return `${intro('Ders programı', 'Günün derslerini ve katılım durumunu düzenle.', true)}
     <section class="panel page-panel">${panelHeading('Dersler ve çalışma oturumları', 'Kutuyu işaretleyerek o gün için katılımını belirle.', button('add-event', 'Ders ekle'))}
       ${weekStrip()}
@@ -251,15 +283,47 @@ function program() {
     </section>`;
 }
 
-function grades() {
-  const ordered = [...state.grades].sort((a, b) => a.value - b.value);
-  return `${intro('Notlar', 'Derslerini girilen nota göre çalışma sırasına koy.')}
-    <section class="panel page-panel">${panelHeading('Ders notların', 'En düşük not üstte görünür.', button('add-grade', 'Not gir'))}
-      ${ordered.length ? `<ul class="record-list">${ordered.map((grade, index) => `
-        <li class="record-row">${icon('chart', 'tile-icon')}<div class="row-title">${escapeText(grade.title)}</div>
-          ${index === 0 ? '<span class="pill urgent">Öncelikli</span>' : ''}
-          <strong class="pill">${grade.value}/100</strong></li>`).join('')}</ul>` : empty('Henüz not eklenmedi.')}
+function sports() {
+  const workouts = eventsForDay().filter(event => event.kind === 'workout');
+  return `${intro('Spor', 'Antrenmanlarını planla ve tamamladıklarını işaretle.', true)}
+    <section class="panel page-panel">
+      ${panelHeading('Antrenmanlar', '', button('add-workout', 'Antrenman ekle'))}
+      ${weekStrip()}
+      ${workouts.length ? `<ul class="record-list">${workouts.map(workout => `
+        <li class="record-row"><label>
+          <input type="checkbox" data-workout="${workout.id}" ${workout.done ? 'checked' : ''} aria-label="${escapeText(workout.title)} antrenmanını tamamladım">
+          <span><span class="row-title">${escapeText(workout.title)}</span><small class="row-meta">${eventTime(workout)} · ${escapeText(workout.detail)}${workout.repeat === 'weekly' ? ' · Her hafta' : ''}</small></span>
+        </label>${attendancePill(workout)}${editButton('workout', workout)}</li>`).join('')}</ul>` : empty('Bu gün için planlanmış antrenman yok.')}
     </section>`;
+}
+
+function grades() {
+  const entries = orderedAssessments();
+  const titles = new Map(courseCatalog.map(([name]) => [courseKey(name), name]));
+  entries.forEach(entry => { if (!titles.has(courseKey(entry.course))) titles.set(courseKey(entry.course), entry.course); });
+  const progress = new Map(weightedCourses().map(course => [course.key, course]));
+  const priorities = new Map(coursePriorities().map(course => [course.key, course]));
+  return `${intro('Notlar', 'Vize %37,5 · Kısa sınav %12,5 · Final / bütünleme %50')}
+    <div class="course-grid">${[...titles].map(([key, name]) => {
+      const records = entries.filter(entry => courseKey(entry.course) === key);
+      const result = progress.get(key);
+      const finished = result && result.gradedWeight >= 99.99999;
+      const priority = priorities.get(key);
+      const summary = finished ? `Tahmini harf: ${courseResult(result.earned).letter}` : priority?.level ? priority.badge : records.length ? `${records.length} kayıt` : 'Henüz not girilmedi';
+      return `<details class="panel course-card" ${activeGradeCourse === key ? 'open' : ''}>
+        <summary>${icon('chart', 'tile-icon')}<span><strong>${escapeText(name)}</strong><small>${summary}</small>${passingLine(priority?.passing)}</span>${icon('chevron-right')}</summary>
+        <div class="course-card-body">
+          ${priority?.observed !== null && priority?.level ? `<p class="form-feedback">${escapeText(priority.reason)}</p>` : ''}
+          ${records.length ? assessmentRows(records, true) : ''}
+          ${plannerButton('add-course-grade', 'Not gir', name, 'plus')}
+        </div>
+      </details>`;
+    }).join('')}</div>
+    <p class="row-meta planning-panel">Harf tahmini NEÜ lisans yönetmeliğindeki standart puan aralıklarına göre hesaplanır. Öğretim elemanı AA–CB sınırlarını aşağı çekebilir. Resmî not için OBS’yi esas al.</p>
+    ${weightedGrades()}
+    ${state.grades.length ? `<section class="panel page-panel planning-panel">${panelHeading('Önceki genel notlar')}
+      <ul class="record-list">${state.grades.map(grade => `<li class="record-row">${icon('chart', 'tile-icon')}<div class="row-title">${escapeText(grade.title)}</div>
+      <strong class="pill">${grade.value}/100</strong></li>`).join('')}</ul></section>` : ''}`;
 }
 
 function documents() {
@@ -293,7 +357,7 @@ function discover() {
 }
 
 function render() {
-  const views = { bugun: dashboard, program, notlar: grades, dokumanlar: documents, uyku: sleepPage, kesfet: discover };
+  const views = { bugun: dashboard, dersler: coursesPage, program, takvim: assessmentsPage, notlar: grades, calisma: studyProgramPage, dokumanlar: documents, uyku: sleepPage, spor: sports, odak: focusPage, hafta: weeklyPage, kesfet: discover, esitle: syncPage };
   const requested = location.hash.slice(1);
   const page = Object.hasOwn(views, requested) ? requested : 'bugun';
   const label = pages[page];
@@ -321,29 +385,96 @@ function dateField(label, record) {
 
 function taskFields(task) {
   return titleField('Görev adı', task) + dateField('Görev tarihi', task) +
+    courseField('Ders (isteğe bağlı)', task?.course) +
+    inputField('Teslim saati (isteğe bağlı)', 'dueTime', task?.dueTime, 'type="time"') +
     field('Öncelik', `<select name="priority"><option>Normal</option><option ${task?.priority === 'Öncelikli' ? 'selected' : ''}>Öncelikli</option></select>`);
 }
 
-function lessonFields(lesson) {
-  const place = lesson?.place ?? lesson?.detail?.split(' • ')[1] ?? '';
-  return titleField('Ders adı', lesson) + dateField('İlk ders tarihi', lesson) +
-    field('Tekrar', `<select name="repeat"><option value="once">Tek sefer</option><option value="weekly" ${lesson?.repeat === 'weekly' ? 'selected' : ''}>Her hafta aynı gün</option></select>`) +
-    `<div class="time-fields">
-      ${field('Başlangıç', `<input name="time" type="time" value="${lesson?.time ?? ''}" required>`)}
-      ${field('Bitiş (isteğe bağlı)', `<input name="endTime" type="time" value="${lesson?.endTime ?? ''}">`)}
-    </div>` +
+const workoutSuggestionHint = 'Seçilen güne göre. Bitiş saati girilmeyen etkinlikler için 60 dakika ayrılır.';
+
+function activityFields(record, workout = false) {
+  const place = record?.place ?? record?.detail?.split(' • ')[1] ?? '';
+  const time = field('Başlangıç', `<input name="time" type="time" value="${record?.time ?? ''}" required>`);
+  const duration = workout
+    ? field('Süre (dk)', `<input name="minutes" type="number" min="5" max="720" value="${record?.minutes ?? 45}" required>`)
+    : field('Bitiş (isteğe bağlı)', `<input name="endTime" type="time" value="${record?.endTime ?? ''}">`);
+  const title = workout ? titleField('Antrenman adı', record) : courseField('Ders adı', record?.title, true, 'title');
+  return title + dateField(workout ? 'İlk antrenman tarihi' : 'İlk ders tarihi', record) +
+    field('Tekrar', `<select name="repeat"><option value="once">Tek sefer</option><option value="weekly" ${record?.repeat === 'weekly' ? 'selected' : ''}>Her hafta aynı gün</option></select>`) +
+    `<div class="time-fields">${time}${duration}</div>` +
+    (workout ? `<details class="preference">
+      <summary>Tercih edilen saat aralığı</summary>
+      <div class="time-fields">
+        ${field('En erken', `<input name="earliest" type="time" value="${record?.earliest ?? ''}">`)}
+        ${field('En geç bitiş', `<input name="latest" type="time" value="${record?.latest ?? ''}">`)}
+      </div>
+    </details><div class="suggestion">
+      ${button('suggest-workout', 'Saat öner', 'sparkle')}
+      <small class="row-meta" id="workout-suggestion" role="status">${workoutSuggestionHint}</small>
+    </div>` : '') +
     field('Yer', `<input name="place" value="${escapeText(place)}" maxlength="80">`);
 }
 
+function clockMinutes(time) {
+  const [hour, minute] = time.split(':').map(Number);
+  return hour * 60 + minute;
+}
+
+function clockLabel(minutes) {
+  return [Math.floor(minutes / 60), minutes % 60].map(part => String(part).padStart(2, '0')).join(':');
+}
+
+function suggestWorkout() {
+  const day = form.elements.namedItem('day');
+  const duration = form.elements.namedItem('minutes');
+  if (!day.reportValidity() || !duration.reportValidity()) return;
+
+  const sleep = sleepTimes();
+  const wake = clockMinutes(sleep.wake);
+  const bed = clockMinutes(sleep.bedtime);
+  const windows = wake < bed ? [[wake, bed]] : [[0, bed], [wake, 1439]];
+  const earliest = form.elements.namedItem('earliest').value;
+  const latest = form.elements.namedItem('latest').value;
+  const preferenceStart = earliest ? clockMinutes(earliest) : 0;
+  const preferenceEnd = latest ? clockMinutes(latest) : 1439;
+  const message = document.querySelector('#workout-suggestion');
+  if (preferenceStart >= preferenceEnd) {
+    message.textContent = 'En geç bitiş saati, en erken başlangıçtan sonra olmalı.';
+    return;
+  }
+  const busy = eventsForDay(day.value)
+    .filter(event => event.id !== editedRecord?.id && (event.kind !== 'lesson' || event.attending))
+    .map(event => {
+      const start = clockMinutes(event.time);
+      return [start, event.endTime ? clockMinutes(event.endTime) : start + 60];
+    });
+  const minutes = duration.valueAsNumber;
+  if (sleep.duration < 24) {
+    for (const [start, end] of windows) {
+      const first = Math.ceil(Math.max(start, preferenceStart) / 15) * 15;
+      for (let candidate = first; candidate + minutes <= Math.min(end, preferenceEnd); candidate += 15) {
+        if (busy.some(([from, to]) => candidate < to && candidate + minutes > from)) continue;
+        const time = form.elements.namedItem('time');
+        time.setCustomValidity('');
+        time.value = clockLabel(candidate);
+        message.textContent = `Önerilen saat ${time.value}–${clockLabel(candidate + minutes)}.`;
+        return;
+      }
+    }
+  }
+  message.textContent = 'Bu gün için uygun saat bulunamadı. Tarihi ya da süreyi değiştirebilirsin.';
+}
+
 function openEditor(type, recordId) {
-  editedRecord = type === 'edit-task' ? state.tasks.find(record => record.id === recordId) :
-    type === 'edit-event' ? state.events.find(record => record.id === recordId) : undefined;
+  const records = type === 'edit-task' ? state.tasks : state.events;
+  editedRecord = recordId ? records.find(record => record.id === recordId) : undefined;
   const editors = {
     'add-task': ['Görev ekle', taskFields()],
     'edit-task': ['Görevi düzenle', taskFields(editedRecord)],
-    'add-event': ['Ders ekle', lessonFields()],
-    'edit-event': ['Dersi düzenle', lessonFields(editedRecord)],
-    'add-grade': ['Not gir', field('Ders adı', '<input name="title" maxlength="100" required autofocus>') + field('100 üzerinden not', '<input name="value" type="number" min="0" max="100" step="0.01" required>')],
+    'add-event': ['Ders ekle', activityFields()],
+    'edit-event': ['Dersi düzenle', activityFields(editedRecord)],
+    'add-workout': ['Antrenman ekle', activityFields(undefined, true)],
+    'edit-workout': ['Antrenmanı düzenle', activityFields(editedRecord, true)],
     'add-document': ['Materyal seç', field('Dosya', '<input name="file" type="file" required autofocus>')],
     'edit-sleep': ['Uyku planını düzenle', field('Yatma saati', `<input name="bedtime" type="time" value="${state.sleep.bedtime}" required autofocus>`) + field('Uyku hedefi (saat)', `<input name="duration" type="number" value="${state.sleep.duration}" min="0.5" max="24" step="0.5" required>`)],
   };
@@ -360,14 +491,17 @@ function openEditor(type, recordId) {
 function deleteRecord() {
   if (!editedRecord) return;
   const task = editorType === 'edit-task';
-  const label = task ? 'Görev' : editedRecord.repeat === 'weekly' ? 'Haftalık ders serisi' : 'Ders';
+  const workout = editorType === 'edit-workout';
+  const name = workout ? 'Antrenman' : 'Ders';
+  const label = task ? 'Görev' : editedRecord.repeat === 'weekly' ? `Haftalık ${name.toLocaleLowerCase('tr')} serisi` : name;
   if (!window.confirm(`${label} silinsin mi?`)) return;
   const records = task ? state.tasks : state.events;
   records.splice(records.indexOf(editedRecord), 1);
   dialog.close();
   save(`${label} silindi.`);
   render();
-  document.querySelector(task ? '#tasks-panel [data-action="add-task"]' : '[data-action="add-event"]')?.focus();
+  const addAction = task ? 'add-task' : workout ? 'add-workout' : 'add-event';
+  document.querySelector(`[data-action="${addAction}"]`)?.focus();
 }
 
 document.addEventListener('click', event => {
@@ -378,6 +512,8 @@ document.addEventListener('click', event => {
     dialog.close();
   } else if (action === 'delete-record') {
     deleteRecord();
+  } else if (action === 'suggest-workout') {
+    suggestWorkout();
   } else if (action === 'pick-day') {
     selectedDay = button.dataset.day;
     render();
@@ -393,9 +529,15 @@ document.addEventListener('click', event => {
 });
 
 document.addEventListener('change', event => {
-  const { task, event: lesson } = event.target.dataset;
-  if (!task && !lesson) return;
+  const { task, event: lesson, workout } = event.target.dataset;
+  if (!task && !lesson && !workout) return;
   if (task) state.tasks.find(entry => entry.id === task).done = event.target.checked;
+  else if (workout) {
+    const entry = state.events.find(record => record.id === workout);
+    entry.completion ??= {};
+    if (event.target.checked) entry.completion[selectedDay] = true;
+    else delete entry.completion[selectedDay];
+  }
   else {
     const entry = state.events.find(record => record.id === lesson);
     if (entry.repeat === 'weekly') {
@@ -407,10 +549,16 @@ document.addEventListener('change', event => {
   }
   save('Değişiklik kaydedildi.');
   render();
-  document.querySelector(task ? `[data-task="${task}"]` : `[data-event="${lesson}"]`)?.focus();
+  const attribute = task ? 'task' : workout ? 'workout' : 'event';
+  document.querySelector(`[data-${attribute}="${task ?? workout ?? lesson}"]`)?.focus();
 });
 
-form.addEventListener('input', () => form.elements.namedItem('endTime')?.setCustomValidity(''));
+form.addEventListener('input', () => {
+  form.elements.namedItem('endTime')?.setCustomValidity('');
+  form.elements.namedItem('time')?.setCustomValidity('');
+  const message = document.querySelector('#workout-suggestion');
+  if (message) message.textContent = workoutSuggestionHint;
+});
 
 form.addEventListener('submit', event => {
   event.preventDefault();
@@ -427,18 +575,35 @@ form.addEventListener('submit', event => {
   switch (editorType) {
     case 'add-task':
     case 'edit-task': {
-      const values = { title, day: recordDay, priority: data.get('priority') };
-      if (editedRecord) Object.assign(editedRecord, values);
+      const values = { title, day: recordDay, priority: data.get('priority'), course: canonicalCourse(data.get('course')), dueTime: data.get('dueTime') };
+      if (editedRecord) {
+        if (recordDay > editedRecord.day) {
+          editedRecord.postponements ??= [];
+          editedRecord.postponements.push({ changedOn: activeDay(), from: editedRecord.day, to: recordDay });
+        }
+        Object.assign(editedRecord, values);
+      }
       else state.tasks.push({ id, ...values, done: false });
       selectedDay = recordDay;
       if (location.hash && location.hash !== '#bugun') location.hash = 'bugun';
       break;
     }
     case 'add-event':
-    case 'edit-event': {
+    case 'edit-event':
+    case 'add-workout':
+    case 'edit-workout': {
       const time = data.get('time');
-      const endTime = data.get('endTime');
-      if (endTime && endTime <= time) {
+      const workout = data.has('minutes');
+      const minutes = workout ? Number(data.get('minutes')) : undefined;
+      const workoutEnd = workout ? clockMinutes(time) + minutes : 0;
+      if (workoutEnd >= 1440) {
+        const input = form.elements.namedItem('time');
+        input.setCustomValidity('Antrenman aynı gün içinde bitmeli.');
+        input.reportValidity();
+        return;
+      }
+      const endTime = workout ? clockLabel(workoutEnd) : data.get('endTime');
+      if (!workout && endTime && endTime <= time) {
         const input = form.elements.namedItem('endTime');
         input.setCustomValidity('Bitiş saati başlangıçtan sonra olmalı.');
         input.reportValidity();
@@ -446,8 +611,18 @@ form.addEventListener('submit', event => {
       }
       const place = data.get('place').trim();
       const repeat = data.get('repeat');
-      const values = { day: recordDay, time, endTime, title, place, repeat, detail: place ? `Ders • ${place}` : 'Ders' };
-      if (editedRecord) {
+      const category = workout ? `${minutes} dk` : 'Ders';
+      const values = { day: recordDay, time, endTime, title: workout ? title : canonicalCourse(title), place, repeat, minutes, detail: place ? `${category} • ${place}` : category };
+      if (workout) {
+        values.earliest = data.get('earliest');
+        values.latest = data.get('latest');
+      }
+      if (workout && editedRecord) {
+        Object.assign(editedRecord, values);
+        for (const day of Object.keys(editedRecord.completion ?? {})) {
+          if (!occursOn(editedRecord, day)) delete editedRecord.completion[day];
+        }
+      } else if (editedRecord) {
         const wasWeekly = editedRecord.repeat === 'weekly';
         const attending = editedRecord.attendance?.[recordDay] ?? editedRecord.attending;
         Object.assign(editedRecord, values);
@@ -463,16 +638,9 @@ form.addEventListener('submit', event => {
           editedRecord.attending = attending;
         }
       } else {
-        state.events.push({ id, ...values, kind: 'lesson', attending: true });
+        state.events.push({ id, ...values, kind: workout ? 'workout' : 'lesson', attending: !workout });
       }
       if (!editedRecord || !occursOn(editedRecord, selectedDay)) selectedDay = recordDay;
-      break;
-    }
-    case 'add-grade': {
-      const value = Number(data.get('value'));
-      const existing = state.grades.find(grade => grade.title.toLocaleLowerCase('tr') === title.toLocaleLowerCase('tr'));
-      if (existing) existing.value = value;
-      else state.grades.push({ id, title, value });
       break;
     }
     case 'add-document':
