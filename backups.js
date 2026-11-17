@@ -1,5 +1,7 @@
 const automaticBackupsKey = 'everything-app-backups-v1';
 const backupAuxiliaryKeys = [
+  'everything-app-books-v1',
+  'everything-app-curiosity-v1',
   'everything-app-fitness-v1', 'everything-app-relationship-v1',
   'everything-app-sleep-habits-v1', 'everything-app-discover-saved-v1',
   'everything-app-news-archive-v1',

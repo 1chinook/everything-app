@@ -179,6 +179,7 @@ function discoverPage() {
   const items = discoverCatalog();
   const count = items.filter(discoverMatches).length;
   return `${intro('Keşfet', 'Matematik ve bilgisayar bilimi önde, farklı alanlardan günlük haberler.')}
+    ${curiosityPanel()}
     <div id="discover-content">
       <section class="panel discover-feeds" aria-labelledby="discover-feed-heading">
         <div><h2 id="discover-feed-heading">Günlük haber akışı</h2><p id="discover-news-status" role="status">${escapeText(newsStatus())}</p>

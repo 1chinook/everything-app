@@ -159,6 +159,8 @@ document.addEventListener('change', event => {
 // Source: backups.js
 const automaticBackupsKey = 'everything-app-backups-v1';
 const backupAuxiliaryKeys = [
+  'everything-app-books-v1',
+  'everything-app-curiosity-v1',
   'everything-app-fitness-v1', 'everything-app-relationship-v1',
   'everything-app-sleep-habits-v1', 'everything-app-discover-saved-v1',
   'everything-app-news-archive-v1',
@@ -483,6 +485,412 @@ document.addEventListener('click', event => {
 });
 
 
+// Source: curiosity.js
+const curiosityKey = 'everything-app-curiosity-v1';
+const curiositySeeds = [
+  ['Matematik', 'Sonsuzlukların büyüklükleri neden farklı?', 'Cantor teoremi'],
+  ['Bilgisayar', 'Bir bilgisayar rastgele sayı üretebilir mi?', 'Rastgele sayı üreteci'],
+  ['Tarih', 'Antik İskenderiye Kütüphanesi nasıl bir yerdi?', 'İskenderiye Kütüphanesi'],
+  ['Sanat', 'Bir resimde perspektif nasıl kurulur?', 'Perspektif'],
+  ['Doğa', 'Mantarlar bitkilerle nasıl ilişki kurar?', 'Mikoriza'],
+  ['Uzay', 'Bir yıldızın uzaklığı nasıl ölçülür?', 'Paralaks'],
+  ['Müzik', 'Aynı nota farklı çalgılarda neden farklı duyulur?', 'Tını'],
+  ['Dil', 'Diller birbirinden nasıl kelime alır?', 'Ödünçleme'],
+  ['Felsefe', 'Bir düşünce deneyi bize ne öğretebilir?', 'Düşünce deneyi'],
+  ['Mühendislik', 'Asma köprüler yükü nasıl taşır?', 'Asma köprü'],
+  ['Matematik', 'Bir yüzeyin tek tarafı olabilir mi?', 'Möbius şeridi'],
+  ['Bilgisayar', 'Bir algoritmanın çözemeyeceği sorular var mı?', 'Durma problemi'],
+  ['Kültür', 'Takvimler neden birbirinden farklı?', 'Takvim'],
+  ['Okyanus', 'Okyanusun dibinde güneşsiz yaşam nasıl olur?', 'Hidrotermal baca'],
+];
+let curiosityTab = 'daily';
+let curiosityMessage = '';
+let curiosityLinks = [];
+let curiosityLoading = false;
+let curiosityRequest = 0;
+
+function readCuriosity() {
+  try {
+    const data = JSON.parse(localStorage.getItem(curiosityKey));
+    if (!data || !Array.isArray(data.questions) || !Array.isArray(data.routes)) return { questions: [], routes: [], daily: null };
+    return data;
+  } catch { return { questions: [], routes: [], daily: null }; }
+}
+
+let curiosityData = readCuriosity();
+
+function keepCuriosity(next) {
+  try {
+    localStorage.setItem(curiosityKey, JSON.stringify(next));
+    curiosityData = next;
+    curiosityMessage = 'Kaydedildi.';
+    return true;
+  } catch {
+    curiosityMessage = 'Kaydedilemedi. Tarayıcı depolama alanını kontrol edip tekrar dene.';
+    return false;
+  }
+}
+
+function curiosityDay() {
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Istanbul' }).format(new Date());
+}
+
+function curiosityPick() {
+  if (curiosityData.daily?.day === curiosityDay()) return curiosityData.daily;
+  const pending = curiosityData.questions.filter(q => !q.done);
+  if (pending.length) {
+    const question = pending[0];
+    return { day: curiosityDay(), title: question.title, topic: question.topic || question.title, category: 'Merak kuyruğundan', questionId: question.id };
+  }
+  const dayNumber = Math.floor(Date.parse(curiosityDay()) / 86400000);
+  const [category, title, topic] = curiositySeeds[dayNumber % curiositySeeds.length];
+  return { day: curiosityDay(), title, topic, category };
+}
+
+function wikiSearch(topic) {
+  return 'https://tr.wikipedia.org/w/index.php?search=' + encodeURIComponent(topic);
+}
+
+function wikiArticle(title, language = 'tr') {
+  return `https://${language === 'en' ? 'en' : 'tr'}.wikipedia.org/wiki/` + encodeURIComponent(title.replaceAll(' ', '_'));
+}
+
+function curiosityDaily() {
+  const pick = curiosityPick();
+  if (curiosityData.daily?.day !== pick.day) keepCuriosity({...curiosityData, daily:pick});
+  return `<p class="row-meta">${escapeText(pick.category)} · ${escapeText(pick.day)}</p>
+    <h3>${escapeText(pick.title)}</h3>
+    <p class="row-meta">Okurken bir yeni bilgi, bir bağlantı ve aklına gelen bir soru not al.</p>
+    <div class="sync-actions"><a class="button secondary" href="${wikiSearch(pick.topic)}" target="_blank" rel="noopener noreferrer">Wikipedia’da araştır</a>
+    <button class="button primary" data-curiosity="start-daily">Okuma rotası başlat</button>
+    <button class="button secondary" data-curiosity="shuffle">Başka konu seç</button>
+    ${pick.questionId ? `<button class="button secondary" data-curiosity="complete-daily">Araştırdım</button>` : ''}</div>`;
+}
+
+function curiosityQueue() {
+  return `<form id="curiosity-question-form" class="sync-form">
+    ${field('Neyi merak ediyorsun?', '<input name="title" maxlength="200" required placeholder="Örneğin, zaman neden tek yönde ilerliyor?">')}
+    ${field('Araştırılacak konu (isteğe bağlı)', '<input name="topic" maxlength="100" placeholder="Örneğin, zamanın oku">')}
+    <button class="button primary" type="submit">Merak kuyruğuna ekle</button></form>
+    <div class="curiosity-records">${curiosityData.questions.length ? curiosityData.questions.map(q => `<article class="curiosity-record">
+    <div><strong>${escapeText(q.title)}</strong><small class="row-meta">${q.done ? 'Araştırıldı' : 'Araştırılacak'}${q.topic ? ' · ' + escapeText(q.topic) : ''}</small></div>
+    <div class="sync-actions"><button class="button secondary" data-curiosity="toggle" data-id="${escapeText(q.id)}">${q.done ? 'Yeniden sıraya al' : 'Araştırdım'}</button>
+    <button class="button secondary" data-curiosity="question-route" data-id="${escapeText(q.id)}">Rota başlat</button>
+    <button class="button secondary" data-curiosity="delete-question" data-id="${escapeText(q.id)}">Sil</button></div></article>`).join('') : empty('Aklına gelen ilk soruyla başla.')}</div>`;
+}
+
+function curiosityRoutes() {
+  const route = curiosityData.routes.find(r => r.id === curiosityData.activeRoute);
+  return `<form id="curiosity-route-form" class="sync-form">
+    ${field('Başlangıç makalesi', '<input name="title" maxlength="150" required placeholder="Örneğin, Graf teorisi">')}
+    ${field('Wikipedia dili', '<select name="language"><option value="tr">Türkçe</option><option value="en">İngilizce</option></select>')}
+    <button class="button primary" type="submit">Yeni rota</button></form>
+    ${curiosityData.routes.length ? field('Kayıtlı rotalar', `<select id="curiosity-route-select">${curiosityData.routes.map(r => `<option value="${escapeText(r.id)}" ${r.id === route?.id ? 'selected' : ''}>${escapeText(r.title)} · ${r.steps.length} durak</option>`).join('')}</select>`) : empty('Bir makaleyle başla. Okudukça bağlantıları rotana ekle.')}
+    ${route ? `<ol class="curiosity-steps">${route.steps.map((step, index) => `<li><div class="curiosity-record"><a href="${wikiArticle(step.title, route.language)}" target="_blank" rel="noopener noreferrer">${escapeText(step.title)}</a>
+    <button class="button secondary" data-curiosity="read-step" data-index="${index}" aria-pressed="${!!step.read}">${step.read ? 'Okundu' : 'Okudum'}</button></div>${step.note ? `<p class="row-meta">${escapeText(step.note)}</p>` : ''}</li>`).join('')}</ol>
+    <form id="curiosity-step-form" class="sync-form">
+    ${field('Sonraki makale', '<input name="title" maxlength="150" required placeholder="Okurken karşılaştığın bir bağlantı">')}
+    ${field('Bu bağlantıyı neden seçtin?', '<textarea name="note" rows="2" maxlength="1500" placeholder="İki konu arasındaki ilişkiyi not al"></textarea>')}
+    <button class="button primary" type="submit">Rotaya ekle</button></form>
+    <div class="sync-actions"><button class="button secondary" data-curiosity="links" ${curiosityLoading ? 'disabled' : ''}>${curiosityLoading ? 'Bağlantılar yükleniyor…' : 'Son makalenin bağlantılarını getir'}</button>
+    <button class="button secondary" data-curiosity="delete-route">Rotayı sil</button></div>
+    <div class="curiosity-links">${curiosityLinks.map((title, i) => `<button class="button secondary" data-curiosity="add-link" data-index="${i}">${escapeText(title)}</button>`).join('')}</div>` : ''}`;
+}
+
+function curiosityPanel() {
+  const tabs = { daily: 'Günün keşfi', queue: 'Merak kuyruğu', routes: 'Okuma rotaları' };
+  return `<section id="curiosity-panel" class="panel page-panel curiosity-panel" aria-label="Kişisel keşif">
+    ${panelHeading('Merakını takip et')}
+    <div class="curiosity-body"><div class="sync-actions" role="group" aria-label="Keşif araçları">${Object.entries(tabs).map(([key, name]) => `<button class="button ${key === curiosityTab ? 'primary' : 'secondary'}" data-curiosity-tab="${key}" aria-pressed="${key === curiosityTab}">${name}</button>`).join('')}</div>
+    <div class="curiosity-content">${({daily: curiosityDaily, queue: curiosityQueue, routes: curiosityRoutes})[curiosityTab]()}</div>
+    <p class="row-meta" role="status">${escapeText(curiosityMessage)}</p><small class="row-meta">Kayıtların bu tarayıcıda saklanır ve otomatik yedeklere eklenir.</small></div></section>`;
+}
+
+function refreshCuriosity() {
+  const panel = document.querySelector('#curiosity-panel');
+  if (panel) panel.outerHTML = curiosityPanel();
+}
+
+function startCuriosityRoute(title, language = 'tr') {
+  const route = { id: crypto.randomUUID(), title, language, steps: [{title, read: false, note: ''}] };
+  if (keepCuriosity({...curiosityData, routes: [...curiosityData.routes, route], activeRoute: route.id})) {
+    curiosityTab = 'routes';
+    curiosityLinks = [];
+    curiosityRequest++;
+    curiosityLoading = false;
+  }
+}
+
+async function loadCuriosityLinks() {
+  const route = curiosityData.routes.find(r => r.id === curiosityData.activeRoute);
+  if (!route) return;
+  const request = ++curiosityRequest;
+  curiosityLoading = true;
+  curiosityLinks = [];
+  curiosityMessage = '';
+  refreshCuriosity();
+  try {
+    const query = new URLSearchParams({action:'query', format:'json', origin:'*', redirects:'1', prop:'links', plnamespace:'0', pllimit:'30', titles:route.steps.at(-1).title});
+    const response = await fetch(`https://${route.language}.wikipedia.org/w/api.php?${query}`, {signal: AbortSignal.timeout(10000)});
+    if (!response.ok) throw new Error('Wikipedia unavailable');
+    const data = await response.json();
+    if (request !== curiosityRequest) return;
+    curiosityLinks = Object.values(data.query?.pages ?? {}).flatMap(page => page.links ?? []).map(link => link.title).filter(title => !route.steps.some(step => step.title === title));
+    curiosityMessage = curiosityLinks.length ? 'Bir bağlantı seçerek rotana ekleyebilirsin.' : 'Bağlantı bulunamadı. Makale başlığını kontrol edebilir veya sonraki durağı kendin ekleyebilirsin.';
+  } catch {
+    if (request === curiosityRequest) curiosityMessage = 'Wikipedia’ya ulaşılamadı. Makaleyi açıp bağlantı başlığını elle ekleyebilir veya tekrar deneyebilirsin.';
+  } finally {
+    if (request === curiosityRequest) { curiosityLoading = false; refreshCuriosity(); }
+  }
+}
+
+document.addEventListener('submit', event => {
+  const form = event.target;
+  if (!['curiosity-question-form', 'curiosity-route-form', 'curiosity-step-form'].includes(form.id)) return;
+  event.preventDefault();
+  const values = new FormData(form);
+  const title = values.get('title').trim();
+  if (!title) { form.elements.title.value = ''; form.reportValidity(); return; }
+  if (form.id === 'curiosity-question-form') {
+    keepCuriosity({...curiosityData, questions:[...curiosityData.questions, {id:crypto.randomUUID(), title, topic:values.get('topic').trim(), done:false}]});
+  } else if (form.id === 'curiosity-route-form') startCuriosityRoute(title, values.get('language'));
+  else {
+    const routes = curiosityData.routes.map(route => route.id === curiosityData.activeRoute ? {...route, steps:[...route.steps, {title, note:values.get('note').trim(), read:false}]} : route);
+    if (keepCuriosity({...curiosityData, routes})) { curiosityLinks = []; curiosityRequest++; curiosityLoading = false; }
+  }
+  refreshCuriosity();
+});
+
+document.addEventListener('change', event => {
+  if (event.target.id !== 'curiosity-route-select') return;
+  keepCuriosity({...curiosityData, activeRoute:event.target.value});
+  curiosityLinks = []; curiosityRequest++; curiosityLoading = false;
+  refreshCuriosity();
+});
+
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-curiosity], [data-curiosity-tab]');
+  if (!button) return;
+  curiosityMessage = '';
+  if (button.dataset.curiosityTab) curiosityTab = button.dataset.curiosityTab;
+  const action = button.dataset.curiosity;
+  const id = button.dataset.id;
+  const pick = curiosityPick();
+  if (action === 'shuffle') {
+    const choices = curiositySeeds.filter(seed => seed[1] !== pick.title);
+    const [category, title, topic] = choices[Math.floor(Math.random() * choices.length)];
+    keepCuriosity({...curiosityData, daily:{day:curiosityDay(), category, title, topic}});
+  }
+  if (action === 'start-daily') startCuriosityRoute(pick.topic);
+  if (action === 'question-route') {
+    const q = curiosityData.questions.find(q => q.id === id);
+    if (q) startCuriosityRoute(q.topic || q.title);
+  }
+  if (action === 'toggle' || action === 'complete-daily') keepCuriosity({...curiosityData, questions:curiosityData.questions.map(q => q.id === (id || pick.questionId) ? {...q, done:!q.done} : q)});
+  if (action === 'delete-question' && confirm('Bu soruyu silmek istiyor musun?')) keepCuriosity({...curiosityData, questions:curiosityData.questions.filter(q => q.id !== id)});
+  if (action === 'delete-route' && confirm('Bu rotayı silmek istiyor musun?')) {
+    const routes = curiosityData.routes.filter(r => r.id !== curiosityData.activeRoute);
+    keepCuriosity({...curiosityData, routes, activeRoute:routes[0]?.id});
+    curiosityLinks = []; curiosityRequest++; curiosityLoading = false;
+  }
+  if (action === 'read-step' || action === 'add-link') {
+    const index = Number(button.dataset.index);
+    const routes = curiosityData.routes.map(r => {
+      if (r.id !== curiosityData.activeRoute) return r;
+      return {...r, steps:action === 'read-step' ? r.steps.map((s, i) => i === index ? {...s, read:!s.read} : s) : [...r.steps, {title:curiosityLinks[index], note:'', read:false}]};
+    });
+    if (keepCuriosity({...curiosityData, routes}) && action === 'add-link') { curiosityLinks = []; curiosityRequest++; curiosityLoading = false; }
+  }
+  if (action === 'links') { void loadCuriosityLinks(); return; }
+  refreshCuriosity();
+});
+
+
+// Source: books.js
+const booksStorageKey = 'everything-app-books-v1';
+const bookShelves = { planned: 'Okuyacağım', reading: 'Okuyorum', finished: 'Bitirdim' };
+let bookShelf = 'all';
+let bookQuery = '';
+let selectedBookId = null;
+let bookEditing = false;
+let bookMessage = '';
+
+function readBooks() {
+  try {
+    const books = JSON.parse(localStorage.getItem(booksStorageKey));
+    return Array.isArray(books) ? books.filter(b => b && typeof b.id === 'string' && typeof b.title === 'string' && Object.hasOwn(bookShelves, b.shelf)) : [];
+  } catch { return []; }
+}
+
+let bookRecords = readBooks();
+
+function storeBooks(next, message = 'Kaydedildi.') {
+  try {
+    localStorage.setItem(booksStorageKey, JSON.stringify(next));
+    bookRecords = next;
+    bookMessage = message;
+    return true;
+  } catch {
+    bookMessage = 'Kaydedilemedi. Tarayıcı depolama alanını kontrol edip tekrar dene.';
+    const feedback = document.querySelector('#books-feedback');
+    if (feedback) feedback.textContent = bookMessage;
+    return false;
+  }
+}
+
+function bookInput(label, name, value = '', attributes = '') {
+  return field(label, `<input name="${name}" value="${escapeText(value)}" ${attributes}>`);
+}
+
+function bookEditor(book) {
+  return `<section class="panel page-panel">${panelHeading(book ? 'Kitabı düzenle' : 'Kitap ekle')}
+    <form id="book-editor-form" class="books-body sync-form">
+    ${bookInput('Kitap adı', 'title', book?.title ?? '', 'required maxlength="180"')}
+    ${bookInput('Yazar', 'author', book?.author ?? '', 'maxlength="160"')}
+    ${field('Raf', `<select name="shelf">${Object.entries(bookShelves).map(([key, label]) => `<option value="${key}" ${key === book?.shelf ? 'selected' : ''}>${label}</option>`).join('')}</select>`)}
+    <div class="time-fields">${bookInput('Toplam sayfa (isteğe bağlı)', 'total', book?.total ?? '', 'type="number" min="1" max="100000" step="1"')}
+    ${bookInput('Ulaştığın sayfa', 'page', book?.page ?? 0, 'type="number" min="0" max="100000" step="1" required')}</div>
+    ${field('Puanın', `<select name="rating"><option value="">Henüz puanlamadım</option>${[1,2,3,4,5].map(n => `<option value="${n}" ${book?.rating === n ? 'selected' : ''}>${n} / 5</option>`).join('')}</select>`)}
+    ${field('Kısa değerlendirmen', `<textarea name="review" rows="3" maxlength="3000">${escapeText(book?.review ?? '')}</textarea>`)}
+    <div class="sync-actions"><button type="submit" class="button primary">Kaydet</button><button type="button" class="button secondary" data-books="cancel-edit">Vazgeç</button></div>
+    </form></section>`;
+}
+
+function bookCard(book) {
+  const progress = book.total ? Math.min(100, Math.round(book.page / book.total * 100)) : null;
+  return `<article class="panel book-card"><small class="row-meta">${bookShelves[book.shelf]}</small>
+    <h2>${escapeText(book.title)}</h2><p class="row-meta">${escapeText(book.author || 'Yazar eklenmedi')}</p>
+    <p>${book.page} ${book.total ? '/ ' + book.total : ''} sayfa${progress === null ? '' : ' · %' + progress}</p>
+    ${progress === null ? '' : `<progress value="${book.page}" max="${book.total}" aria-label="${escapeText(book.title)} okuma ilerlemesi"></progress>`}
+    ${book.rating ? `<p class="row-meta">Puanın ${book.rating} / 5</p>` : ''}
+    <button class="button secondary" data-books="open" data-id="${escapeText(book.id)}">Günlüğü aç</button></article>`;
+}
+
+function bookDetails(book) {
+  const sessions = book.sessions ?? [];
+  const notes = book.notes ?? [];
+  return `<div class="sync-actions books-toolbar"><button class="button secondary" data-books="back">Kitaplığa dön</button>
+    <button class="button secondary" data-books="edit">Düzenle</button><button class="button secondary" data-books="delete">Kitabı sil</button></div>
+    <section class="panel page-panel">${panelHeading(escapeText(book.title), escapeText(book.author || bookShelves[book.shelf]))}
+    <div class="books-body"><p>${book.page}${book.total ? ' / ' + book.total : ''} sayfa · ${bookShelves[book.shelf]}${book.rating ? ' · ' + book.rating + ' / 5' : ''}</p>
+    ${book.review ? `<p class="books-prose">${escapeText(book.review)}</p>` : ''}
+    ${book.shelf !== 'finished' ? '<button class="button secondary" data-books="finish">Bitirdim olarak işaretle</button>' : ''}
+    <form id="book-session-form" class="sync-form books-section"><h3>Okuma oturumu</h3>
+    ${bookInput('Tarih', 'day', curiosityDay(), 'type="date" required')}
+    <div class="time-fields">${bookInput('Ulaştığın sayfa', 'page', book.page, `type="number" min="${book.page}" max="${book.total || 100000}" step="1" required`)}
+    ${bookInput('Okuma süresi (dakika)', 'minutes', '', 'type="number" min="1" max="1440" step="1" required')}</div>
+    <button class="button primary" type="submit">Oturumu kaydet</button></form>
+    <details class="books-section"><summary>Okuma geçmişi · ${sessions.length} oturum · ${sessions.reduce((sum,s) => sum+s.minutes,0)} dakika</summary>
+    ${sessions.length ? `<ul class="books-log">${[...sessions].reverse().map(s => `<li>${escapeText(s.day)} · ${s.from}–${s.page}. sayfa · ${s.minutes} dk</li>`).join('')}</ul>` : empty('Henüz okuma oturumu yok.')}</details></div></section>
+    <section class="panel page-panel">${panelHeading('Alıntılar ve notlar')}
+    <div class="books-body"><form id="book-note-form" class="sync-form">
+    ${field('Tür', '<select name="kind"><option value="note">Kişisel not</option><option value="quote">Alıntı</option></select>')}
+    ${bookInput('Sayfa (isteğe bağlı)', 'page', '', `type="number" min="1" max="${book.total || 100000}" step="1"`)}
+    ${field('Metin', '<textarea name="text" rows="3" maxlength="5000" required></textarea>')}
+    <button class="button primary" type="submit">Ekle</button></form>
+    <div class="books-notes">${notes.map(n => `<article><small class="row-meta">${n.kind === 'quote' ? 'Alıntı' : 'Not'}${n.page ? ' · Sayfa ' + n.page : ''}</small><p class="books-prose">${escapeText(n.text)}</p>
+    <div class="sync-actions"><button class="button secondary" data-books="note-question" data-id="${escapeText(n.id)}">Merak kuyruğuna gönder</button><button class="button secondary" data-books="delete-note" data-id="${escapeText(n.id)}">Sil</button></div></article>`).join('') || empty('Hatırlamak istediğin bir cümleyi veya düşünceni ekle.')}</div></div></section>
+    <section class="panel page-panel">${panelHeading('Bu kitap sana neyi merak ettirdi?')}
+    <form id="book-question-form" class="books-body sync-form">${bookInput('Sorun', 'question', '', 'required maxlength="200"')}
+    <button class="button primary" type="submit">Merak kuyruğuna ekle</button></form></section>`;
+}
+
+function booksPage() {
+  const selected = bookRecords.find(b => b.id === selectedBookId);
+  const list = bookRecords.filter(b => (bookShelf === 'all' || b.shelf === bookShelf) && `${b.title} ${b.author}`.toLocaleLowerCase('tr').includes(bookQuery.toLocaleLowerCase('tr')));
+  return `${intro('Kitap günlüğü', 'Okuduklarını, alıntılarını ve aklına gelen soruları biriktir.')}
+    <p id="books-feedback" class="row-meta" role="status">${escapeText(bookMessage)}</p>
+    ${bookEditing ? bookEditor(selected) : selected ? bookDetails(selected) : `<div class="books-toolbar"><button class="button primary" data-books="add">Kitap ekle</button>
+    <div class="sync-actions" role="group" aria-label="Kitap rafları">${Object.entries({all:'Tümü',...bookShelves}).map(([key,label]) => `<button class="button secondary" data-books="shelf" data-shelf="${key}" aria-pressed="${key === bookShelf}">${label} (${bookRecords.filter(b => key === 'all' || b.shelf === key).length})</button>`).join('')}</div></div>
+    <form id="book-search-form" class="books-search">${bookInput('Kitap veya yazar ara', 'query', bookQuery, 'type="search" maxlength="180"')}<button class="button secondary">Ara</button></form>
+    <div class="books-grid">${list.map(bookCard).join('')}</div>${list.length ? '' : empty(bookRecords.length ? 'Bu rafta veya aramada kitap yok.' : 'İlk kitabını ekleyerek başla.')}
+    <p class="row-meta">Kitap günlüğün bu tarayıcıda saklanır ve otomatik yedeklere eklenir.</p>`}`;
+}
+
+function addBookQuestion(book, question) {
+  const next = {...curiosityData, questions:[...curiosityData.questions, {id:crypto.randomUUID(), title:question, topic:book.title, done:false}]};
+  if (!keepCuriosity(next)) {
+    bookMessage = curiosityMessage;
+    return false;
+  }
+  bookMessage = 'Merak kuyruğuna eklendi. Keşfet bölümünden açabilirsin.';
+  return true;
+}
+
+document.addEventListener('submit', event => {
+  const form = event.target;
+  if (!['book-editor-form','book-session-form','book-note-form','book-question-form','book-search-form'].includes(form.id)) return;
+  event.preventDefault();
+  const values = new FormData(form);
+  const book = bookRecords.find(b => b.id === selectedBookId);
+  let next;
+  if (form.id === 'book-search-form') { bookQuery = values.get('query').trim(); render(); return; }
+  if (form.id === 'book-editor-form') {
+    const title = values.get('title').trim();
+    if (!title) { form.elements.title.value = ''; form.reportValidity(); return; }
+    const total = values.get('total') ? Number(values.get('total')) : null;
+    let page = Number(values.get('page'));
+    if (total && page > total) { form.elements.page.setCustomValidity('Ulaşılan sayfa toplam sayfayı aşamaz.'); form.elements.page.reportValidity(); return; }
+    const shelf = values.get('shelf');
+    if (shelf === 'finished' && total) page = total;
+    const record = {...book, id:book?.id ?? crypto.randomUUID(), title, author:values.get('author').trim(), total, page, shelf, rating:values.get('rating') ? Number(values.get('rating')) : null, review:values.get('review').trim(), sessions:book?.sessions ?? [], notes:book?.notes ?? []};
+    next = book ? bookRecords.map(b => b.id === book.id ? record : b) : [...bookRecords,record];
+    if (storeBooks(next)) { selectedBookId = record.id; bookEditing = false; render(); }
+    return;
+  }
+  if (!book) return;
+  if (form.id === 'book-question-form') {
+    const question = values.get('question').trim();
+    if (!question) { form.elements.question.value = ''; form.reportValidity(); return; }
+    if (addBookQuestion(book, question)) render();
+    else document.querySelector('#books-feedback').textContent = bookMessage;
+    return;
+  }
+  if (form.id === 'book-session-form') {
+    const page = Number(values.get('page'));
+    const shelf = book.total && page === book.total ? 'finished' : book.shelf === 'planned' ? 'reading' : book.shelf;
+    const record = {...book, page, shelf, sessions:[...(book.sessions ?? []), {day:values.get('day'), from:book.page, page, minutes:Number(values.get('minutes'))}]};
+    next = bookRecords.map(b => b.id === book.id ? record : b);
+  } else {
+    const text = values.get('text').trim();
+    if (!text) { form.elements.text.value = ''; form.reportValidity(); return; }
+    const note = {id:crypto.randomUUID(), kind:values.get('kind'), page:values.get('page') ? Number(values.get('page')) : null, text};
+    next = bookRecords.map(b => b.id === book.id ? {...b,notes:[...(b.notes ?? []),note]} : b);
+  }
+  if (storeBooks(next)) render();
+});
+
+document.addEventListener('input', event => {
+  if (event.target.closest('#book-editor-form')) event.target.closest('form').elements.page.setCustomValidity('');
+});
+
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-books]');
+  if (!button) return;
+  const action = button.dataset.books;
+  const book = bookRecords.find(b => b.id === selectedBookId);
+  bookMessage = '';
+  if (action === 'add') { selectedBookId = null; bookEditing = true; }
+  if (action === 'open') { selectedBookId = button.dataset.id; bookEditing = false; }
+  if (action === 'back') { selectedBookId = null; bookEditing = false; }
+  if (action === 'edit') bookEditing = true;
+  if (action === 'cancel-edit') bookEditing = false;
+  if (action === 'shelf') bookShelf = button.dataset.shelf;
+  if (book && action === 'delete' && confirm('Kitap ve tüm günlük kayıtları silinsin mi?')) {
+    if (storeBooks(bookRecords.filter(b => b.id !== book.id), 'Kitap silindi.')) selectedBookId = null;
+  }
+  if (book && action === 'finish') {
+    if (storeBooks(bookRecords.map(b => b.id === book.id ? {...b,shelf:'finished',page:b.total ?? b.page} : b), 'Kitap bitirildi. Puan ve değerlendirmeni Düzenle bölümünden ekleyebilirsin.')) bookEditing = true;
+  }
+  if (book && action === 'delete-note' && confirm('Bu not silinsin mi?')) storeBooks(bookRecords.map(b => b.id === book.id ? {...b,notes:b.notes.filter(n => n.id !== button.dataset.id)} : b));
+  if (book && action === 'note-question') {
+    const note = book.notes.find(n => n.id === button.dataset.id);
+    if (note) addBookQuestion(book, note.text);
+  }
+  render();
+});
+
+
 // Source: app-core.js
 const icons = {
   layers: '<path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/>',
@@ -508,6 +916,7 @@ const icons = {
 };
 
 const pages = {
+  kitaplar: 'Kitap günlüğü',
   bugun: 'Bugün',
   dersler: 'Derslerim',
   program: 'Ders programı',
@@ -833,7 +1242,7 @@ function sleepPage() {
 }
 
 function render() {
-  const views = { bugun: dashboard, dersler: coursesPage, program, takvim: assessmentsPage, notlar: grades, calisma: studyProgramPage, dokumanlar: documents, uyku: sleepPage, iliski: relationshipPage, spor: sports, odak: focusPage, hafta: weeklyPage, kesfet: discoverPage, esitle: syncPage };
+  const views = { kitaplar: booksPage, bugun: dashboard, dersler: coursesPage, program, takvim: assessmentsPage, notlar: grades, calisma: studyProgramPage, dokumanlar: documents, uyku: sleepPage, iliski: relationshipPage, spor: sports, odak: focusPage, hafta: weeklyPage, kesfet: discoverPage, esitle: syncPage };
   const requested = location.hash.slice(1);
   const page = Object.hasOwn(views, requested) ? requested : 'bugun';
   const label = pages[page];

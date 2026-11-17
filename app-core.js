@@ -22,6 +22,7 @@ const icons = {
 };
 
 const pages = {
+  kitaplar: 'Kitap günlüğü',
   bugun: 'Bugün',
   dersler: 'Derslerim',
   program: 'Ders programı',
@@ -347,7 +348,7 @@ function sleepPage() {
 }
 
 function render() {
-  const views = { bugun: dashboard, dersler: coursesPage, program, takvim: assessmentsPage, notlar: grades, calisma: studyProgramPage, dokumanlar: documents, uyku: sleepPage, iliski: relationshipPage, spor: sports, odak: focusPage, hafta: weeklyPage, kesfet: discoverPage, esitle: syncPage };
+  const views = { kitaplar: booksPage, bugun: dashboard, dersler: coursesPage, program, takvim: assessmentsPage, notlar: grades, calisma: studyProgramPage, dokumanlar: documents, uyku: sleepPage, iliski: relationshipPage, spor: sports, odak: focusPage, hafta: weeklyPage, kesfet: discoverPage, esitle: syncPage };
   const requested = location.hash.slice(1);
   const page = Object.hasOwn(views, requested) ? requested : 'bugun';
   const label = pages[page];

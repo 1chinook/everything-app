@@ -167,6 +167,36 @@ button:disabled { opacity: .55; cursor: default; }
 .sync-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 #sync-status { margin-bottom: 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.curiosity-panel { margin-bottom: 20px; }
+.curiosity-body { padding: 0 17px 17px; }
+.curiosity-content { margin-top: 20px; }
+.curiosity-content h3 { font-size: 20px; line-height: 1.4; margin: 12px 0; }
+.curiosity-content .sync-form { max-width: 620px; }
+.curiosity-records { display: grid; gap: 12px; }
+.curiosity-record { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.curiosity-records > article { border-top: 1px solid var(--border); padding-top: 14px; }
+.curiosity-record strong, .curiosity-record a, .curiosity-steps p { overflow-wrap: anywhere; }
+.curiosity-record small { display: block; margin-top: 5px; }
+.curiosity-steps { padding-left: 24px; }
+.curiosity-steps > li { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.curiosity-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.curiosity-links .button { white-space: normal; text-align: left; }
+.books-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.books-search { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-bottom: 18px; }
+.books-search .field { flex: 1; min-width: 180px; }
+.books-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 14px; }
+.book-card { padding: 18px; min-width: 0; }
+.book-card h2 { font-size: 18px; overflow-wrap: anywhere; margin: 10px 0 6px; }
+.book-card p { font-size: 13px; }
+.book-card progress { width: 100%; height: 7px; accent-color: var(--accent); margin-bottom: 16px; }
+.books-body { padding: 0 17px 17px; }
+.books-body.sync-form, .books-body > .sync-form { max-width: 680px; }
+.books-section { margin-top: 22px; }
+.books-section h3 { font-size: 15px; margin: 0; }
+.books-section summary { cursor: pointer; line-height: 1.6; }
+.books-log { color: var(--muted); font-size: 13px; line-height: 1.8; padding-left: 20px; }
+.books-notes > article { padding: 16px 0; border-top: 1px solid var(--border); }
+.books-prose { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; font-size: 14px; }
 .daily-checks { margin-top: 15px; }
 .daily-control-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; padding: 0 17px 17px; }
 .daily-control-grid > div { display: grid; gap: 8px; align-content: start; }
