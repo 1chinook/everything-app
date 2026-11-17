@@ -11,10 +11,12 @@ const assets = new Map([
   ['/', ['index.html', 'text/html']],
   ['/index.html', ['index.html', 'text/html']],
   ['/styles.css', ['styles.css', 'text/css']],
+  ['/fitness.css', ['fitness.css', 'text/css']],
   ['/app.js', ['app.js', 'text/javascript']],
   ['/planner.js', ['planner.js', 'text/javascript']],
   ['/courses.js', ['courses.js', 'text/javascript']],
   ['/sync.js', ['sync.js', 'text/javascript']],
+  ['/fitness.js', ['fitness.js', 'text/javascript']],
 ]);
 const maxPayload = 4 * 1024 * 1024;
 

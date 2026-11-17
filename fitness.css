@@ -1,0 +1,143 @@
+.fitness-area {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.fitness-body {
+  display: grid;
+  gap: 13px;
+  padding: 0 17px 17px;
+}
+
+.fitness-body > p, .fitness-subpanel p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.fitness-fields, .fitness-metrics, .fitness-meals {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.fitness-form {
+  display: grid;
+  gap: 11px;
+}
+
+.fitness-metrics > div, .fitness-subpanel {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 12px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: rgba(126, 148, 206, 0.07);
+}
+
+.fitness-metrics > div:nth-child(2) {
+  background: rgba(112, 196, 169, 0.1);
+  border-color: rgba(112, 196, 169, 0.35);
+}
+
+.fitness-metrics strong {
+  font-size: 18px;
+}
+
+.fitness-metrics span, .fitness-card-heading h3, .fitness-subpanel h3 {
+  font-size: 13px;
+}
+
+.fitness-metrics small, .fitness-months small, .fitness-exercises span, .fitness-actions span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.fitness-actions, .fitness-card-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fitness-card-heading {
+  justify-content: space-between;
+}
+
+.fitness-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.fitness-months, .fitness-exercises {
+  list-style: none;
+  display: grid;
+  padding: 0;
+  margin: 0;
+}
+
+.fitness-months li, .fitness-exercises li {
+  border-bottom: 1px solid var(--border);
+  padding: 9px 0;
+  display: grid;
+  gap: 9px;
+}
+
+.fitness-months li {
+  grid-template-columns: 45px minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.fitness-exercises li {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+}
+
+.fitness-months li:last-child, .fitness-exercises li:last-child {
+  border-bottom: 0;
+}
+
+.fitness-months p {
+  margin: 3px 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.fitness-months strong, .fitness-exercises strong, .fitness-month-index {
+  font-size: 13px;
+}
+
+.fitness-month-index {
+  color: var(--muted);
+}
+
+.fitness-sources a {
+  text-decoration: underline;
+}
+
+@media (max-width: 760px) {
+  .fitness-fields, .fitness-metrics, .fitness-meals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .fitness-metrics, .fitness-meals, .fitness-split {
+    grid-template-columns: 1fr;
+  }
+
+  .fitness-months li {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .fitness-months li > .pill {
+    grid-column: 2;
+    justify-self: start;
+  }
+}

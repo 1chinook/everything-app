@@ -294,7 +294,8 @@ function sports() {
           <input type="checkbox" data-workout="${workout.id}" ${workout.done ? 'checked' : ''} aria-label="${escapeText(workout.title)} antrenmanını tamamladım">
           <span><span class="row-title">${escapeText(workout.title)}</span><small class="row-meta">${eventTime(workout)} · ${escapeText(workout.detail)}${workout.repeat === 'weekly' ? ' · Her hafta' : ''}</small></span>
         </label>${attendancePill(workout)}${editButton('workout', workout)}</li>`).join('')}</ul>` : empty('Bu gün için planlanmış antrenman yok.')}
-    </section>`;
+    </section>
+    ${fitnessPlan()}`;
 }
 
 function grades() {
