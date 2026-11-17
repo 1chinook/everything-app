@@ -1,0 +1,136 @@
+#discover-content {
+  display: grid;
+  gap: 1.5rem;
+}
+
+#discover-content [hidden] {
+  display: none;
+}
+
+.discover-feeds {
+  display: grid;
+  gap: 1rem;
+  padding: 1.15rem;
+}
+
+.discover-feeds h2, .discover-catalog-heading h2 {
+  font-size: 1.15rem;
+}
+
+.discover-feeds > div > p {
+  margin-top: .35rem;
+  color: var(--muted);
+  font-size: .875rem;
+}
+
+.discover-feed-grid, .discover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 245px), 1fr));
+  gap: .75rem;
+}
+
+.discover-feed-grid > a {
+  display: grid;
+  gap: .3rem;
+  padding: .65rem .75rem;
+  border: 1px solid var(--border);
+  border-radius: .55rem;
+}
+
+.discover-feed-grid a:hover {
+  border-color: var(--accent);
+}
+
+.discover-feed-grid strong {
+  color: var(--accent);
+  font-size: .875rem;
+}
+
+.discover-feed-grid a > span, .discover-meta, #discover-count {
+  color: var(--muted);
+  font-size: .8rem;
+}
+
+.discover-catalog-heading, .discover-toolbar, .discover-card-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .65rem;
+}
+
+.discover-search {
+  width: min(100%, 20rem);
+}
+
+.discover-toolbar {
+  margin: .75rem 0;
+}
+
+.discover-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+}
+
+.discover-filter[aria-pressed="true"], .discover-save[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: #292342;
+}
+
+.discover-card {
+  display: flex;
+  flex-direction: column;
+  gap: .55rem;
+  padding: .95rem;
+}
+
+.discover-type {
+  color: var(--accent);
+  font-size: .75rem;
+  font-weight: 650;
+}
+
+.discover-type-news {
+  color: #ffbba1;
+}
+
+.discover-type-study {
+  color: var(--mint);
+}
+
+.discover-card h3 {
+  line-height: 1.3;
+  font-size: 1rem;
+}
+
+.discover-note {
+  margin-bottom: .25rem;
+  color: #d4d0e4;
+  font-size: .875rem;
+  line-height: 1.5;
+}
+
+.discover-save {
+  padding: .3rem .5rem;
+  min-height: 1.85rem;
+  font-size: .75rem;
+}
+
+.discover-link {
+  color: var(--accent);
+  width: fit-content;
+  margin-top: auto;
+  font-size: .85rem;
+  font-weight: 650;
+}
+
+.discover-card h3 a:hover, .discover-link:hover {
+  text-decoration: underline;
+}
+
+.discover-empty {
+  padding: 1rem;
+  color: var(--muted);
+}

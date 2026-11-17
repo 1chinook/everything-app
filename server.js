@@ -6,17 +6,20 @@ const path = require('node:path');
 const os = require('node:os');
 const { randomBytes, timingSafeEqual } = require('node:crypto');
 const { validPlannerData } = require('./sync.js');
+const { createNewsReader } = require('./news.js');
 
 const assets = new Map([
   ['/', ['index.html', 'text/html']],
   ['/index.html', ['index.html', 'text/html']],
   ['/styles.css', ['styles.css', 'text/css']],
   ['/fitness.css', ['fitness.css', 'text/css']],
+  ['/discover.css', ['discover.css', 'text/css']],
   ['/app.js', ['app.js', 'text/javascript']],
   ['/planner.js', ['planner.js', 'text/javascript']],
   ['/courses.js', ['courses.js', 'text/javascript']],
   ['/sync.js', ['sync.js', 'text/javascript']],
   ['/fitness.js', ['fitness.js', 'text/javascript']],
+  ['/discover.js', ['discover.js', 'text/javascript']],
 ]);
 const maxPayload = 4 * 1024 * 1024;
 
@@ -57,12 +60,18 @@ function readSnapshot(file) {
 }
 
 function createPlannerServer(directory, code) {
+  const dailyNews = createNewsReader();
   const file = path.join(directory, 'plan.json');
   const expected = Buffer.from('Bearer ' + code);
   let record = readSnapshot(file);
   const server = http.createServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     const pathname = request.url?.split('?', 1)[0];
+    if (pathname === '/api/news' && request.method === 'GET') {
+      const news = await dailyNews();
+      sendJson(response, news.checked ? 200 : 503, news);
+      return;
+    }
     if (pathname !== '/api/sync') {
       const asset = assets.get(pathname);
       if (!asset || !['GET', 'HEAD'].includes(request.method)) {

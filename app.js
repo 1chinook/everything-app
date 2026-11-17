@@ -344,21 +344,8 @@ function sleepPage() {
     </section>`;
 }
 
-function discover() {
-  const topics = [
-    ['Bilim', 'Çernobil’de kazadan sonra çalışan reaktörler', 'Nükleer enerji ve yakın tarih'],
-    ['Matematik', 'Özvektörler veri analizinde nerede kullanılır?', 'Lineer cebir ve veri bilimi'],
-    ['Teknoloji', 'Web uygulamalarında hızlı açılış nasıl sağlanır?', 'Web performansı'],
-  ];
-  return `${intro('Keşfet', 'İlgi alanlarına göre örnek okuma konuları.')}
-    <section class="panel page-panel">${panelHeading('Okuma konuları')}
-      <ul class="record-list">${topics.map(([category, title, detail]) => `
-        <li class="record-row">${icon('compass', 'tile-icon')}<div><span class="row-title">${title}</span><small class="row-meta">${detail}</small></div><span class="pill">${category}</span></li>`).join('')}</ul>
-    </section>`;
-}
-
 function render() {
-  const views = { bugun: dashboard, dersler: coursesPage, program, takvim: assessmentsPage, notlar: grades, calisma: studyProgramPage, dokumanlar: documents, uyku: sleepPage, spor: sports, odak: focusPage, hafta: weeklyPage, kesfet: discover, esitle: syncPage };
+  const views = { bugun: dashboard, dersler: coursesPage, program, takvim: assessmentsPage, notlar: grades, calisma: studyProgramPage, dokumanlar: documents, uyku: sleepPage, spor: sports, odak: focusPage, hafta: weeklyPage, kesfet: discoverPage, esitle: syncPage };
   const requested = location.hash.slice(1);
   const page = Object.hasOwn(views, requested) ? requested : 'bugun';
   const label = pages[page];
@@ -370,6 +357,7 @@ function render() {
   });
   content.innerHTML = views[page]();
   fillIcons();
+  if (page === 'kesfet') void refreshDiscoverNews();
 }
 
 function field(label, input) {
