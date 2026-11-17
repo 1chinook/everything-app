@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101119">
+  <meta name="description" content="Everything App ile derslerini, görevlerini ve günlük planını bir arada gör.">
+  <title>Bugün · Everything App</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700;750;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" aria-label="Kenar menüsü">
+      <a href="#bugun" class="brand"><span class="brand-icon" data-icon="layers"></span><span>Everything<span class="brand-suffix"> App</span></span></a>
+      <nav class="navigation" aria-label="Ana menü">
+        <div class="nav-group">
+          <p>PLANLAMA</p>
+          <a href="#bugun" data-page="bugun"><span data-icon="home"></span>Bugün</a>
+          <a href="#program" data-page="program"><span data-icon="calendar"></span>Ders programı</a>
+          <a href="#notlar" data-page="notlar"><span data-icon="chart"></span>Notlar</a>
+          <a href="#dokumanlar" data-page="dokumanlar"><span data-icon="file"></span>Dokümanlar</a>
+        </div>
+        <div class="nav-group">
+          <p>KİŞİSEL</p>
+          <a href="#uyku" data-page="uyku"><span data-icon="moon"></span>Uyku</a>
+          <a href="#kesfet" data-page="kesfet"><span data-icon="compass"></span>Keşfet</a>
+        </div>
+      </nav>
+      <div class="profile"><span class="avatar">Y</span><div><strong>Yusuf</strong><small>Öğrenci</small></div></div>
+    </aside>
+    <main class="workspace" id="main">
+      <header class="topbar">
+        <div class="breadcrumb"><span>Çalışma alanı</span><span data-icon="chevron-right"></span><strong id="current-page">Bugün</strong></div>
+        <button type="button" class="button primary" data-action="add-task"><span data-icon="plus"></span>Görev ekle</button>
+      </header>
+      <div class="content" id="content"></div>
+    </main>
+  </div>
+  <dialog id="editor" aria-labelledby="editor-title">
+    <form id="editor-form" class="editor">
+      <div class="editor-header"><h2 id="editor-title"></h2><button type="button" class="icon-button" aria-label="Kapat" data-action="close-dialog"><span data-icon="x"></span></button></div>
+      <div id="editor-fields" class="form-fields"></div>
+      <div class="editor-actions"><button type="button" class="button danger" data-action="delete-record" hidden>Sil</button><button type="button" class="button secondary" data-action="close-dialog">Vazgeç</button><button class="button primary" type="submit">Kaydet</button></div>
+    </form>
+  </dialog>
+  <div id="status" role="status" class="sr-only"></div>
+</body>
+</html>
