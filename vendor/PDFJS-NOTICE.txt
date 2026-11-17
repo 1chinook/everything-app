@@ -1,0 +1,12 @@
+PDF.js 5.3.34, build cc1e2a3e0
+Copyright 2024 Mozilla Foundation
+https://github.com/mozilla/pdf.js
+https://mozilla.github.io/pdf.js/
+
+The bundled pdf.mjs and pdf.worker.mjs retain their original Apache License
+2.0 notices. These distribution files were sourced from the installed
+Obsidian PDF.js bundle. The files are used for browser-local PDF text
+extraction.
+
+Apache License, Version 2.0
+https://www.apache.org/licenses/LICENSE-2.0
