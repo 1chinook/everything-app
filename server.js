@@ -68,6 +68,21 @@ function createPlannerServer(directory, code) {
   const server = http.createServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     const pathname = request.url?.split('?', 1)[0];
+    if (pathname === '/api/music' && request.method === 'GET') {
+      const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.remoteAddress);
+      const host = /^(?:127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(request.headers.host ?? '');
+      if (!loopback || !host) {
+        sendJson(response, 403, { error: 'local' });
+        return;
+      }
+      try {
+        const picks = JSON.parse(fs.readFileSync(path.join(__dirname, 'daily-music.local.json'), 'utf8'));
+        sendJson(response, 200, picks);
+      } catch {
+        sendJson(response, 404, { error: 'music' });
+      }
+      return;
+    }
     if (pathname === '/api/news' && request.method === 'GET') {
       const news = await dailyNews();
       sendJson(response, news.checked ? 200 : 503, news);

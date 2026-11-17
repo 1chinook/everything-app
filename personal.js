@@ -1,8 +1,12 @@
 const relationshipKey = 'everything-app-relationship-v1';
+const sleepHabitsKey = 'everything-app-sleep-habits-v1';
 let relationshipEntries = readPersonal(relationshipKey, []);
 let editingRelationship;
+let musicPicks = null;
+let musicStart;
+let musicLoading = false;
+let musicMessage = '';
 
-const sleepHabitsKey = 'everything-app-sleep-habits-v1';
 function readPersonal(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
 }
@@ -34,6 +38,57 @@ function relationshipPage() {
         <button type="button" class="button danger" data-relationship="delete" data-id="${escapeText(entry.id)}">Sil</button>
       </li>`).join('')}</ul>` : empty('Henüz bir plan eklemedin.')}
     </section>`;
+}
+
+function sleepQuality(sleep) {
+  const windDown = clockLabel((clockMinutes(sleep.bedtime) + 1410) % 1440);
+  const saved = readPersonal(sleepHabitsKey, {});
+  const habits = saved.day === activeDay() ? saved.habits : [];
+  const suggestions = [
+    ['routine', `Hafta sonu da dahil olmak üzere ${sleep.bedtime} yatış ve ${sleep.wake} kalkış düzenine yakın kal.`],
+    ['screen', `${windDown} civarında ekranları kapatıp düşük ışığa geç.`],
+    ['caffeine', 'Kahve, çay ve enerji içeceklerindeki kafeini öğleden sonraya ve akşama bırakma.'],
+    ['room', 'Odayı serin, karanlık ve sessiz tut. Yurtta gerekiyorsa göz maskesi kullan veya oda arkadaşınla sessizlik saatini konuş.'],
+    ['meal', 'Yatmaya yakın büyük öğünlerden kaçın.'],
+  ];
+  return `<section class="panel page-panel planning-panel">
+    ${panelHeading('Uyku kalitesi', 'Bu akşam uyguladıklarını işaretle. Liste her gün yenilenir.')}
+    <ul class="record-list">${suggestions.map(([id, label]) => `<li class="record-row"><label>
+      <input type="checkbox" data-sleep-habit="${id}" ${habits.includes(id) ? 'checked' : ''}><span class="row-title">${label}</span>
+    </label></li>`).join('')}</ul>
+    <p class="sleep-note"><a class="text-link" href="https://www.cdc.gov/sleep/about/" target="_blank" rel="noopener noreferrer">CDC uyku alışkanlıkları ↗</a></p>
+  </section>`;
+}
+
+function dailyMusicCard() {
+  const index = Math.max(0, Math.floor((dateFor(activeDay()).valueOf() - (musicStart ?? 0)) / 86400000));
+  const pick = musicPicks?.length ? musicPicks[index % musicPicks.length] : null;
+  const detail = pick
+    ? `<strong>${escapeText(pick.title)}</strong><p class="row-meta">${escapeText(pick.artist)} · Spotify dinlemelerine göre seçilen listeden</p>
+      <a class="button secondary" href="${escapeText(pick.url)}" target="_blank" rel="noopener noreferrer">Spotify’da aç</a>`
+    : `<p class="row-meta">${escapeText(musicMessage || 'Spotify önerileri yükleniyor.')}</p>`;
+  return `<section class="panel planning-panel" id="daily-music" data-day="${activeDay()}">${panelHeading('Günün müziği')}<div class="sync-content">${detail}</div></section>`;
+}
+
+async function refreshDailyMusic() {
+  if (musicLoading || musicPicks || !document.querySelector('#daily-music')) return;
+  musicLoading = true;
+  try {
+    if (location.protocol === 'file:') throw new Error('local');
+    const response = await fetch('/api/music', { signal: AbortSignal.timeout(4000) });
+    if (!response.ok) throw new Error('music');
+    const { tracks, start } = await response.json();
+    musicStart = dateFor(start).valueOf();
+    musicPicks = tracks.filter(track => typeof track.title === 'string' && typeof track.artist === 'string' &&
+      /^https:\/\/open\.spotify\.com\/track\/[A-Za-z0-9]+(?:\?|$)/.test(track.url));
+    if (!musicPicks.length) musicMessage = 'Kişisel öneri listesi bu cihazda yok.';
+  } catch {
+    musicMessage = 'Bu bilgisayarda node server.js çalıştırıp http://127.0.0.1:4173 adresini aç. Günlük Spotify önerisini ChatGPT’de de alırsın.';
+  } finally {
+    musicLoading = false;
+    const card = document.querySelector('#daily-music');
+    if (card) card.outerHTML = dailyMusicCard();
+  }
 }
 
 document.addEventListener('submit', event => {
@@ -69,26 +124,6 @@ document.addEventListener('click', event => {
   render();
   if (editingRelationship) document.querySelector('#relationship-form input')?.focus();
 });
-
-function sleepQuality(sleep) {
-  const windDown = clockLabel((clockMinutes(sleep.bedtime) + 1410) % 1440);
-  const saved = readPersonal(sleepHabitsKey, {});
-  const habits = saved.day === activeDay() ? saved.habits : [];
-  const suggestions = [
-    ['routine', `Hafta sonu da dahil olmak üzere ${sleep.bedtime} yatış ve ${sleep.wake} kalkış düzenine yakın kal.`],
-    ['screen', `${windDown} civarında ekranları kapatıp düşük ışığa geç.`],
-    ['caffeine', 'Kahve, çay ve enerji içeceklerindeki kafeini öğleden sonraya ve akşama bırakma.'],
-    ['room', 'Odayı serin, karanlık ve sessiz tut. Yurtta gerekiyorsa göz maskesi kullan veya oda arkadaşınla sessizlik saatini konuş.'],
-    ['meal', 'Yatmaya yakın büyük öğünlerden kaçın.'],
-  ];
-  return `<section class="panel page-panel planning-panel">
-    ${panelHeading('Uyku kalitesi', 'Bu akşam uyguladıklarını işaretle. Liste her gün yenilenir.')}
-    <ul class="record-list">${suggestions.map(([id, label]) => `<li class="record-row"><label>
-      <input type="checkbox" data-sleep-habit="${id}" ${habits.includes(id) ? 'checked' : ''}><span class="row-title">${label}</span>
-    </label></li>`).join('')}</ul>
-    <p class="sleep-note"><a class="text-link" href="https://www.cdc.gov/sleep/about/" target="_blank" rel="noopener noreferrer">CDC uyku alışkanlıkları ↗</a></p>
-  </section>`;
-}
 
 document.addEventListener('change', event => {
   const habit = event.target.dataset.sleepHabit;

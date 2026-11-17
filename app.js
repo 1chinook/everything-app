@@ -266,7 +266,8 @@ function dashboard() {
         ${tasksList(tasks)}
       </section>
     </div>
-    ${dashboardPlanning()}`;
+    ${dashboardPlanning()}
+    ${dailyMusicCard()}`;
 }
 
 function program() {
@@ -361,6 +362,7 @@ function render() {
   content.innerHTML = views[page]();
   fillIcons();
   if (page === 'kesfet') void refreshDiscoverNews();
+  if (page === 'bugun') void refreshDailyMusic();
 }
 
 function field(label, input) {
