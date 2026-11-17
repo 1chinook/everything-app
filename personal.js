@@ -6,6 +6,8 @@ let musicPicks = null;
 let musicStart;
 let musicLoading = false;
 let musicMessage = '';
+let musicStatus;
+let musicCheckedAt = 0;
 
 function readPersonal(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
@@ -62,28 +64,42 @@ function sleepQuality(sleep) {
 
 function dailyMusicCard() {
   const index = Math.max(0, Math.floor((dateFor(activeDay()).valueOf() - (musicStart ?? 0)) / 86400000));
-  const pick = musicPicks?.length ? musicPicks[index % musicPicks.length] : null;
+  const pick = musicStatus?.track ?? (musicPicks?.length ? musicPicks[index % musicPicks.length] : null);
   const detail = pick
-    ? `<strong>${escapeText(pick.title)}</strong><p class="row-meta">${escapeText(pick.artist)} · Spotify dinlemelerine göre seçilen listeden</p>
+    ? `<strong>${escapeText(pick.title)}</strong><p class="row-meta">${escapeText(pick.artist)} · ${musicStatus?.track ? 'Bugün Spotify’dan seçildi' : 'Önceki kişisel seçkiden'}</p>
       <a class="button secondary" href="${escapeText(pick.url)}" target="_blank" rel="noopener noreferrer">Spotify’da aç</a>`
     : `<p class="row-meta">${escapeText(musicMessage || 'Spotify önerileri yükleniyor.')}</p>`;
-  return `<section class="panel planning-panel" id="daily-music" data-day="${activeDay()}">${panelHeading('Günün müziği')}<div class="sync-content">${detail}</div></section>`;
+  const setup = musicStatus?.configured && !musicStatus.connected
+    ? '<a class="button secondary" href="/api/music/connect">Spotify’a bağlan</a>'
+    : musicStatus?.configured === false ? `<details class="preference">
+      <summary>Spotify otomasyonunu kur</summary>
+      <ol class="sync-steps"><li><a class="text-link" href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">Spotify Developer Dashboard ↗</a> üzerinden bir uygulama oluştur.</li>
+      <li>Redirect URI olarak <code>http://127.0.0.1:4173/api/music/callback</code> adresini ekle.</li>
+      <li>Proje klasöründe <code>spotify-config.local.json</code> dosyası oluştur ve içine <code>{"clientId":"..."} </code> yaz.</li>
+      <li>Sunucuyu yeniden başlat ve Spotify’a bağlan.</li></ol></details>` : '';
+  const notice = musicStatus?.message || (musicStatus?.connected && !musicStatus.track ? 'Spotify otomasyonu bugünkü parçayı hazırlıyor.' : '');
+  return `<section class="panel planning-panel" id="daily-music" data-day="${activeDay()}">${panelHeading('Günün müziği')}<div class="sync-content">${detail}
+    ${setup}${notice ? `<p class="row-meta">${escapeText(notice)}</p>` : ''}</div></section>`;
 }
 
 async function refreshDailyMusic() {
-  if (musicLoading || musicPicks || !document.querySelector('#daily-music')) return;
+  if (musicLoading || Date.now() - musicCheckedAt < 55000 || !document.querySelector('#daily-music')) return;
   musicLoading = true;
+  musicCheckedAt = Date.now();
   try {
     if (location.protocol === 'file:') throw new Error('local');
     const response = await fetch('/api/music', { signal: AbortSignal.timeout(4000) });
     if (!response.ok) throw new Error('music');
-    const { tracks, start } = await response.json();
-    musicStart = dateFor(start).valueOf();
-    musicPicks = tracks.filter(track => typeof track.title === 'string' && typeof track.artist === 'string' &&
-      /^https:\/\/open\.spotify\.com\/track\/[A-Za-z0-9]+(?:\?|$)/.test(track.url));
+    const { tracks = [], start, track, configured, connected, message } = await response.json();
+    musicStart = start ? dateFor(start).valueOf() : 0;
+    const isTrack = value => value && typeof value.title === 'string' && typeof value.artist === 'string' &&
+      /^https:\/\/open\.spotify\.com\/track\/[A-Za-z0-9]+(?:\?|$)/.test(value.url);
+    musicStatus = { track: isTrack(track) ? track : null, configured, connected, message };
+    musicPicks = tracks.filter(isTrack);
+    musicMessage = connected ? 'Bugünkü parça henüz hazır değil.' : 'Spotify bağlantısı bekleniyor.';
     if (!musicPicks.length) musicMessage = 'Kişisel öneri listesi bu cihazda yok.';
   } catch {
-    musicMessage = 'Bu bilgisayarda node server.js çalıştırıp http://127.0.0.1:4173 adresini aç. Günlük Spotify önerisini ChatGPT’de de alırsın.';
+    musicMessage = 'Bu bilgisayarda node server.js çalıştırıp http://127.0.0.1:4173 adresini aç.';
   } finally {
     musicLoading = false;
     const card = document.querySelector('#daily-music');
@@ -107,8 +123,7 @@ document.addEventListener('submit', event => {
 });
 
 setInterval(() => {
-  const card = document.querySelector('#daily-music');
-  if (card && musicPicks && card.dataset.day !== activeDay()) card.outerHTML = dailyMusicCard();
+  void refreshDailyMusic();
 }, 60000);
 
 document.addEventListener('click', event => {

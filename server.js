@@ -7,6 +7,7 @@ const os = require('node:os');
 const { randomBytes, timingSafeEqual } = require('node:crypto');
 const { validPlannerData } = require('./sync.js');
 const { createNewsReader } = require('./news.js');
+const { createSpotifyMusic } = require('./spotify-music.js');
 
 const assets = new Map([
   ['/', ['index.html', 'text/html']],
@@ -21,6 +22,13 @@ const assets = new Map([
   ['/fitness.js', ['fitness.js', 'text/javascript']],
   ['/discover.js', ['discover.js', 'text/javascript']],
   ['/personal.js', ['personal.js', 'text/javascript']],
+  ['/scenarios.js', ['scenarios.js', 'text/javascript']],
+  ['/daily.js', ['daily.js', 'text/javascript']],
+  ['/backups.js', ['backups.js', 'text/javascript']],
+  ['/materials.js', ['materials.js', 'text/javascript']],
+  ['/materials.css', ['materials.css', 'text/css']],
+  ['/vendor/pdf.mjs', ['vendor/pdf.mjs', 'text/javascript']],
+  ['/vendor/pdf.worker.mjs', ['vendor/pdf.worker.mjs', 'text/javascript']],
 ]);
 const maxPayload = 4 * 1024 * 1024;
 
@@ -61,26 +69,40 @@ function readSnapshot(file) {
 }
 
 function createPlannerServer(directory, code) {
-  const dailyNews = createNewsReader();
+  const dailyNews = createNewsReader({ directory });
+  const music = createSpotifyMusic(directory);
   const file = path.join(directory, 'plan.json');
   const expected = Buffer.from('Bearer ' + code);
   let record = readSnapshot(file);
   const server = http.createServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     const pathname = request.url?.split('?', 1)[0];
-    if (pathname === '/api/music' && request.method === 'GET') {
+    if (['/api/music', '/api/music/connect', '/api/music/callback'].includes(pathname) && request.method === 'GET') {
       const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.remoteAddress);
       const host = /^(?:127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(request.headers.host ?? '');
       if (!loopback || !host) {
         sendJson(response, 403, { error: 'local' });
         return;
       }
-      try {
-        const picks = JSON.parse(fs.readFileSync(path.join(__dirname, 'daily-music.local.json'), 'utf8'));
-        sendJson(response, 200, picks);
-      } catch {
-        sendJson(response, 404, { error: 'music' });
+      if (pathname === '/api/music/connect') {
+        const authorization = music.connect();
+        if (authorization) response.writeHead(302, { Location: authorization, 'Cache-Control': 'no-store' }).end();
+        else sendJson(response, 400, { error: 'spotify_config' });
+        return;
       }
+      if (pathname === '/api/music/callback') {
+        const query = new URLSearchParams(request.url.slice(pathname.length + 1));
+        const authorized = await music.callback(query);
+        response.writeHead(303, { Location: authorized ? '/#bugun' : '/?spotify=authorization-failed#bugun', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' }).end();
+        return;
+      }
+      void music.refresh();
+      const status = music.current();
+      let picks = {};
+      try {
+        picks = JSON.parse(fs.readFileSync(path.join(__dirname, 'daily-music.local.json'), 'utf8'));
+      } catch { /* A previously generated list is optional. */ }
+      sendJson(response, 200, { ...picks, ...status });
       return;
     }
     if (pathname === '/api/news' && request.method === 'GET') {
@@ -98,7 +120,7 @@ function createPlannerServer(directory, code) {
       response.writeHead(200, {
         'Content-Type': type + '; charset=utf-8',
         'Cache-Control': 'no-cache',
-        'Content-Security-Policy': "default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
+        'Content-Security-Policy': "default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'",
       });
       if (request.method === 'HEAD') response.end();
       else fs.createReadStream(path.join(__dirname, name)).on('error', () => response.destroy()).pipe(response);
@@ -150,6 +172,17 @@ function createPlannerServer(directory, code) {
     }
   });
   server.requestTimeout = 15000;
+  let refreshInterval;
+  function refreshDailyContent() {
+    void dailyNews().catch(() => {});
+    void music.refresh().catch(() => {});
+  }
+  server.on('listening', () => {
+    refreshDailyContent();
+    refreshInterval = setInterval(refreshDailyContent, 60000);
+    refreshInterval.unref();
+  });
+  server.on('close', () => clearInterval(refreshInterval));
   return server;
 }
 

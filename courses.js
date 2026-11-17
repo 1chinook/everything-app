@@ -123,6 +123,15 @@ function topicLines(text) {
   return [...new Set(text.split(/\r?\n/).map(topic => topic.trim()).filter(Boolean))];
 }
 
+function topicMastery(course, topic) {
+  return state.topicMastery?.[courseKey(course)]?.[topic] ?? 'unknown';
+}
+
+function orderedTopics(course, topics) {
+  const rank = { unknown: 0, partial: 1, known: 2 };
+  return [...topics].sort((a, b) => rank[topicMastery(course, a)] - rank[topicMastery(course, b)]);
+}
+
 function coursesPage() {
   return `${intro('Derslerim', 'Konu taslaklarını kendi ders içeriğine göre düzenle.')}
     <div class="course-grid">${courseCatalog.map(([title]) => {
@@ -131,7 +140,10 @@ function coursesPage() {
         <summary>${icon('book', 'tile-icon')}<span><strong>${escapeText(title)}</strong>
           <small>${topics.length} konu</small></span>${icon('chevron-right')}</summary>
         <div class="course-card-body">
-          ${topics.length ? `<ol>${topics.map(topic => `<li>${escapeText(topic)}</li>`).join('')}</ol>` : '<p class="form-feedback">Henüz konu yok.</p>'}
+          ${topics.length ? `<ol>${topics.map(topic => `<li><label class="field"><span>${escapeText(topic)}</span>
+            <select data-topic-mastery="${escapeText(topic)}" data-course="${escapeText(title)}" aria-label="${escapeText(topic)} konu hâkimiyeti">
+            ${Object.entries({unknown:'Bilmiyorum',partial:'Kısmen biliyorum',known:'Çözebiliyorum'}).map(([value,label])=>`<option value="${value}" ${topicMastery(title,topic)===value?'selected':''}>${label}</option>`).join('')}
+            </select></label></li>`).join('')}</ol>` : '<p class="form-feedback">Henüz konu yok.</p>'}
           <div class="sync-actions">
             ${plannerButton('edit-course-topics', 'Konuları düzenle', title, 'pencil')}
             ${plannerButton('course-assessment', 'Sınav ekle', title, 'plus')}
@@ -155,3 +167,14 @@ document.querySelector('#course-names').replaceChildren(...courseCatalog.map(([t
   option.value = title;
   return option;
 }));
+
+document.addEventListener('change', event => {
+  const topic = event.target.dataset.topicMastery;
+  const course = event.target.dataset.course;
+  if (!topic || !course || !['unknown', 'partial', 'known'].includes(event.target.value)) return;
+  state.topicMastery ??= {};
+  const key = courseKey(course);
+  state.topicMastery[key] ??= {};
+  state.topicMastery[key][topic] = event.target.value;
+  save('Konu hâkimiyeti kaydedildi.');
+});

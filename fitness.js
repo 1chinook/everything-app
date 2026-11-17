@@ -1,6 +1,4 @@
 const fitnessStorageKey = 'everything-app-fitness-v1';
-const fitnessInitialWeight = 95;
-const fitnessInitialHeight = 178;
 const fitnessLocale = new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 1 });
 const fitnessActivityLevels = {
   low: { label: 'Günün çoğu oturarak geçiyor, az yürüyüş', factor: 1.4 },
@@ -13,7 +11,7 @@ const fitnessMonths = [
   ['Hacmi artır', '2 salon günü · çoğu harekette 2 set', 'Toparlanman iyiyse yürüyüşlere 5–10 dakika ekle. Haftalık tartı eğilimine ve salon performansına birlikte bak.'],
   ['Ritmi koru', '2–3 salon günü · 2–3 set', 'Tempolu yürüyüşleri haftaya dağıt. Uygunsa orta yoğunlukta toplam 120–150 dakikaya yaklaş.'],
   ['Yükü ilerlet', '2–3 salon günü · 2–3 set', 'Üst tekrar sınırına iyi formla ulaşınca küçük bir ağırlık artışı yap. Uygunsa 150 dakika civarında tempolu yürüyüşü sürdür.'],
-  ['Sürdürülebilir hale getir', '2–3 salon günü · toparlanmana göre', 'Sınav haftasında iki tam vücut seansını önceliklendir. Başlangıç kilosunun yaklaşık %5’i olan 4,8 kg’lık ilk hedefi değerlendir.'],
+  ['Sürdürülebilir hale getir', '2–3 salon günü · toparlanmana göre', 'Sınav haftasında iki tam vücut seansını önceliklendir. İlk kilo hedefine doğru ilerlemeni değerlendir.'],
 ];
 
 const fitnessWorkouts = {
@@ -64,6 +62,10 @@ function fitnessInput(label, name, value, attributes) {
 }
 
 function fitnessTargets(profile) {
+  const initialWeight = profile.initialWeight ?? profile.weight;
+  const weightGoal = Number.isFinite(initialWeight) && initialWeight >= 35 && initialWeight <= 300
+    ? `Yaklaşık ${fitnessLocale.format(Math.round(initialWeight * 0.95))} kg`
+    : 'Başlangıç kilonu gir';
   const calories = fitnessCalorieEstimate(profile);
   const steps = fitnessStepTarget(profile.baseline, 1);
   const caloriesText = calories?.target ? `${fitnessLocale.format(calories.target)} kcal/gün` : 'Bilgilerini gir';
@@ -72,7 +74,7 @@ function fitnessTargets(profile) {
     : calories ? 'Hesaplanan değer düşük kaldı. Kişisel bir hedef için diyetisyenle değerlendirebilirsin.'
       : 'Yetişkin tahmini için yaş, formül seçimi ve hareket düzeyi gerekiyor.';
   return `<div class="fitness-metrics">
-    <div><span>Beş aylık ilk kilo hedefi</span><strong>Yaklaşık 90 kg</strong><small>95 kg başlangıca göre yaklaşık %5 kayıp. Hedefe varma süresi kişiden kişiye değişir.</small></div>
+    <div><span>Beş aylık ilk kilo hedefi</span><strong>${weightGoal}</strong><small>Başlangıç kilosuna göre yaklaşık %5 kayıp. Hedefe varma süresi kişiden kişiye değişir.</small></div>
     <div><span>Günlük kalori hedefi</span><strong>${caloriesText}</strong><small>${calorieHint}</small></div>
     <div><span>İlk ay adım hedefi</span><strong>${steps ? `${fitnessLocale.format(steps)} adım/gün` : '7 gün ölç'} </strong><small>${steps ? 'Günlük sayı yerine haftalık ortalamayı takip et.' : 'Telefonundaki 7 günlük ortalamayı gir. Ağrı veya belirgin yorgunluk varsa artışı beklet.'}</small></div>
   </div>`;
@@ -83,8 +85,8 @@ function fitnessProfileForm(profile) {
     `<option value="${value}"${profile.activity === value ? ' selected' : ''}>${entry.label}</option>`).join('');
   return `<form id="fitness-profile-form" class="fitness-form">
     <div class="fitness-fields">
-      ${fitnessInput('Güncel kilo (kg)', 'weight', profile.weight ?? fitnessInitialWeight, 'type="number" min="35" max="300" step="0.1" required')}
-      ${fitnessInput('Boy (cm)', 'height', profile.height ?? fitnessInitialHeight, 'type="number" min="130" max="230" step="1" required')}
+      ${fitnessInput('Güncel kilo (kg)', 'weight', profile.weight, 'type="number" min="35" max="300" step="0.1" required')}
+      ${fitnessInput('Boy (cm)', 'height', profile.height, 'type="number" min="130" max="230" step="1" required')}
       ${fitnessInput('Yaş', 'age', profile.age, 'type="number" min="19" max="78" step="1" placeholder="Kalori hesabı için"')}
       ${field('Enerji formülü için cinsiyet', `<select name="sex"><option value="">Seç</option>
         <option value="female"${profile.sex === 'female' ? ' selected' : ''}>Kadın</option><option value="male"${profile.sex === 'male' ? ' selected' : ''}>Erkek</option></select>`)}
@@ -173,7 +175,7 @@ function fitnessPlan() {
   const profile = fitnessData.profile ?? {};
   return `<div class="fitness-area">
     <section class="panel fitness-panel">
-      ${panelHeading('5 aylık kilo ve antrenman planı', '95 kg ve 178 cm başlangıç bilgilerine göre. Yurt yemekleri, yürüyüş ve salon programı bir arada.')}
+      ${panelHeading('5 aylık kilo ve antrenman planı', 'Yurt yemekleri, yürüyüş ve salon programı bir arada. Kilo ve boy bilgilerin bu tarayıcıda saklanır.')}
       <div class="fitness-body">
         <div id="fitness-targets">${fitnessTargets(profile)}</div>
         ${fitnessProfileForm(profile)}
@@ -213,8 +215,10 @@ document.addEventListener('submit', event => {
   const data = new FormData(form);
   const number = name => data.get(name) === '' ? null : Number(data.get(name));
   if (form.id === 'fitness-profile-form') {
+    const weight = number('weight');
     const profile = {
-      weight: number('weight'), height: number('height'), age: number('age'),
+      weight, initialWeight: fitnessData.profile?.initialWeight ?? fitnessData.profile?.weight ?? weight,
+      height: number('height'), age: number('age'),
       sex: data.get('sex'), activity: data.get('activity'), baseline: number('baseline'),
     };
     fitnessData.profile = profile;

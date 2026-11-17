@@ -25,10 +25,11 @@ function validPlannerData(data) {
     optional(item.place, text) && optional(item.studyDone, boolean)) &&
     list(data.tasks, item => day(item.day) && text(item.title) && ['Normal', 'Öncelikli'].includes(item.priority) &&
       boolean(item.done) && optional(item.course, text) && optional(item.dueTime, time) && optional(item.deadline, boolean) &&
+      optional(item.plannedTime, time) && optional(item.plannedEnd, time) &&
       (item.postponements == null || Array.isArray(item.postponements) &&
         item.postponements.every(change => change && day(change.changedOn) && day(change.from) && day(change.to)))) &&
     list(data.grades, item => text(item.title) && range(item.value, 0, 100)) &&
-    list(data.documents, item => text(item.name)) &&
+    list(data.documents, item => text(item.name) && optional(item.course, text)) &&
     data.sleep && time(data.sleep.bedtime) && range(data.sleep.duration, 0.5, 24) &&
     (data.assessments == null || list(data.assessments, item => text(item.title) && text(item.course) && day(item.day) && time(item.time) &&
       ['exam', 'deadline', 'midterm', 'quiz', 'final'].includes(item.kind) && range(item.weight, 0, 100) &&
@@ -36,6 +37,12 @@ function validPlannerData(data) {
     map(data.targets, key => key.startsWith('course:'), value => range(value, 0, 100)) &&
     map(data.courseTopics, key => key.startsWith('course:'), value => Array.isArray(value) &&
       value.every(topic => typeof topic === 'string' && topic.length <= 2500) && value.join('\n').length <= 2500) &&
+    map(data.topicMastery, key => key.startsWith('course:'), value => map(value, text,
+      level => ['unknown', 'partial', 'known'].includes(level))) &&
+    map(data.dailyChecks, day, value => map(value, key => ['steps', 'sleep'].includes(key), boolean)) &&
+    (data.planning == null || range(data.planning.travelMinutes, 0, 120) && range(data.planning.breakMinutes, 0, 60) &&
+      range(data.planning.mealMinutes, 0, 120) && range(data.planning.dailyStudyMinutes, 30, 720) &&
+      Array.isArray(data.planning.meals) && data.planning.meals.length <= 6 && data.planning.meals.every(time)) &&
     (data.focusLogs == null || list(data.focusLogs, item => text(item.title) && text(item.course) && day(item.day) &&
       range(item.planned, 1, 180) && range(item.seconds, 0, 10800)));
 }
@@ -78,7 +85,8 @@ function syncPage() {
         <button type="button" class="button secondary" data-sync="import">Yedek seç</button>
         <input type="file" id="backup-input" accept=".json,application/json" hidden>
       </div>
-    </section>`;
+    </section>
+    ${backupsPanel()}`;
 }
 
 function showSyncMessage(message) {
@@ -122,10 +130,13 @@ async function syncRequest(code, body) {
 
 function replacePlannerData(data) {
   if (!validPlannerData(data)) throw new Error('Bu yedek Everything App kayıt biçimiyle uyumlu değil.');
+  if (!createAutomaticBackup(true, 'Veri değiştirme öncesi')) throw new Error('Mevcut plan yedeklenemedi. Önce JSON yedeğini indir.');
   data = withoutDemoRecords(data);
   Object.assign(state, {
     events: data.events, tasks: data.tasks, grades: data.grades, documents: data.documents, sleep: data.sleep,
     assessments: data.assessments ?? [], targets: data.targets ?? {}, focusLogs: data.focusLogs ?? [], courseTopics: data.courseTopics ?? {},
+    topicMastery: data.topicMastery ?? {}, dailyChecks: data.dailyChecks ?? {},
+    planning: data.planning ?? { travelMinutes: 20, breakMinutes: 10, mealMinutes: 30, meals: ['08:00', '12:30', '19:00'], dailyStudyMinutes: 180 },
   });
 }
 
@@ -228,9 +239,11 @@ function installSyncControls() {
       if (!validPlannerData(data)) throw new Error('Bu yedek Everything App kayıt biçimiyle uyumlu değil.');
       if (!window.confirm('Bu cihazdaki plan yedek kopyayla değiştirilsin mi?')) return;
       replacePlannerData(data);
+      if (data.backupExtras) restoreBackupExtras(data.backupExtras);
       save('Yedek içe aktarıldı.');
       showSyncMessage('Yedek içe aktarıldı.');
-      render();
+      if (data.backupExtras) location.reload();
+      else render();
     } catch (error) {
       showSyncMessage(error.message);
     } finally {

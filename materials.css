@@ -1,0 +1,4 @@
+.material-date { margin: 0; padding: 10px; border: 1px solid var(--border); border-radius: 9px; display: grid; gap: 8px; }
+.material-date legend { color: var(--muted); font-size: 12px; }
+.material-date legend label { display: flex; align-items: center; gap: 6px; }
+.material-date input[type="checkbox"] { accent-color: var(--accent); }

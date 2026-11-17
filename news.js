@@ -1,6 +1,8 @@
 'use strict';
 
 const { createHash } = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const sources = [
   ['Quanta Magazine', 'Matematik', 'https://www.quantamagazine.org/mathematics/feed/', 3],
   ['Quanta Magazine', 'Bilgisayar bilimi', 'https://www.quantamagazine.org/computer-science/feed/', 3],
@@ -43,8 +45,15 @@ function parseFeed(xml, [source, topic, , limit], now) {
   return items.sort((a, b) => b.published - a.published).slice(0, limit);
 }
 
-function createNewsReader({ fetchFeed = fetch, clock = Date.now } = {}) {
-  const cache = new Map();
+function createNewsReader({ fetchFeed = fetch, clock = Date.now, directory } = {}) {
+  const cacheFile = directory ? path.join(directory, 'daily-news.json') : null;
+  let stored = [];
+  if (cacheFile) {
+    try { stored = JSON.parse(fs.readFileSync(cacheFile, 'utf8')); } catch { /* First run or damaged cache. */ }
+  }
+  const allowed = new Set(sources.map(source => source[2]));
+  const cache = new Map(Array.isArray(stored) ? stored.filter(entry => Array.isArray(entry) &&
+    allowed.has(entry[0]) && entry[1] && Array.isArray(entry[1].items)) : []);
   let pending;
   return async function dailyNews() {
     if (pending) return pending;
@@ -65,6 +74,18 @@ function createNewsReader({ fetchFeed = fetch, clock = Date.now } = {}) {
           cache.set(url, { ...previous, retryAfter: now + 15 * 60000 });
         }
       }));
+      if (cacheFile) {
+        const draft = cacheFile + '.' + createHash('sha256').update(String(now)).digest('hex').slice(0, 12) + '.tmp';
+        try {
+          fs.mkdirSync(directory, { recursive: true });
+          fs.writeFileSync(draft, JSON.stringify([...cache]), { flag: 'wx' });
+          fs.renameSync(draft, cacheFile);
+        } catch {
+          // The running server retains the latest headlines in memory.
+        } finally {
+          try { fs.rmSync(draft, { force: true }); } catch { /* Keep serving cached headlines. */ }
+        }
+      }
       const checked = Math.max(0, ...[...cache.values()].map(entry => entry.checked ?? 0));
       const available = new Set();
       const items = sources.flatMap(source => cache.get(source[2])?.items ?? []).filter(item => {

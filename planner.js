@@ -218,23 +218,50 @@ function studyProgramPage() {
   const blocks = state.events.filter(event => isPlannedStudy(event) && event.day >= start && event.day <= end)
     .sort((a, b) => (a.day + a.time).localeCompare(b.day + b.time));
   return `${intro('Çalışma programı', 'Geçme hedefi 60. Önümüzdeki 7 günde öncelikli derslere daha fazla süre ayır.')}
+    ${planningSettings()}
     <section class="panel">
       ${panelHeading('Derse göre çalışma süresi', 'Önerilen süre boşluğa göre yerleştirilir. Eksik not, sıfır olarak sayılmaz.', plannerButton('balance-study', 'Haftayı planla', '', 'sparkle', true))}
       <ul class="record-list">${coursePriorities().map(course => {
         const planned = blocks.filter(block => courseKey(block.detail) === course.key)
           .reduce((sum, block) => sum + clockMinutes(block.endTime) - clockMinutes(block.time), 0);
         return `<li class="record-row planning-row"><div><strong class="row-title">${escapeText(course.title)}</strong>
-          <small class="row-meta">${course.sessions.reduce((sum, minutes) => sum + minutes, 0)} dk öneri · ${planned} dk planlandı</small>
+          <small class="row-meta">${masterySessions(course).reduce((sum, minutes) => sum + minutes, 0)} dk öneri · ${planned} dk planlandı</small>
           <small class="row-meta">${escapeText(course.reason)}</small>${passingLine(course.passing)}</div>
           ${course.level ? `<span class="pill urgent">${course.badge}</span>` : ''}</li>`;
       }).join('')}</ul>
     </section>
     <section class="panel planning-panel">
-      ${panelHeading('Önümüzdeki 7 gün')}
+      ${panelHeading('Önümüzdeki 7 gün', '', plannerButton('redistribute', 'Kaçan işleri dağıt'))}
       ${blocks.length ? `<ul class="record-list">${blocks.map(event => `<li class="record-row"><div>
         <strong class="row-title">${escapeText(event.title)}</strong><small class="row-meta">${escapeText(event.detail)} · ${dayFormat.format(dateFor(event.day))} · ${eventTime(event)}</small>
         ${event.focusPlan ? `<small class="row-meta">${studyGuide(event)}</small>` : ''}</div>${studyControls(event)}</li>`).join('')}</ul>` : empty('Henüz bir çalışma oturumu planlanmadı.')}
     </section>`;
+}
+
+function planningRules() {
+  return {
+    travelMinutes: 20,
+    breakMinutes: 10,
+    mealMinutes: 30,
+    meals: ['08:00', '12:30', '19:00'],
+    dailyStudyMinutes: 180,
+    ...state.planning,
+  };
+}
+
+function planningSettings() {
+  const rules = planningRules();
+  return `<details class="panel page-panel planning-panel"><summary class="panel-heading">Zaman ayarları</summary>
+    <form id="planning-settings" class="sync-content form-fields"><div class="assessment-numbers">
+      ${inputField('Ulaşım (tek yön, dk)', 'travelMinutes', rules.travelMinutes, 'type="number" min="0" max="120" required')}
+      ${inputField('Oturum arası mola (dk)', 'breakMinutes', rules.breakMinutes, 'type="number" min="0" max="60" required')}
+      ${inputField('Günlük çalışma sınırı (dk)', 'dailyStudyMinutes', rules.dailyStudyMinutes, 'type="number" min="30" max="600" required')}
+    </div><div class="assessment-numbers">${rules.meals.map((time, index) => {
+      const label = ['Kahvaltı', 'Öğle', 'Akşam'][index];
+      return inputField(label, 'meal' + index, time, 'type="time" required');
+    }).join('')}</div>
+      ${inputField('Her öğün için süre (dk)', 'mealMinutes', rules.mealMinutes, 'type="number" min="10" max="120" required')}
+      <button class="button secondary" type="submit">Ayarları kaydet</button></form></details>`;
 }
 
 function weightedGrades() {
@@ -337,25 +364,39 @@ function dashboardPlanning() {
   </div>`;
 }
 
-function freeStudySlot(day, minutes, deadline, blocked, skipId) {
+function freeStudySlot(day, minutes, deadline, blocked, skipId, minimumStart = 0) {
   const sleep = sleepTimes();
   if (sleep.duration >= 24) return null;
   const wake = clockMinutes(sleep.wake);
   const bed = clockMinutes(sleep.bedtime);
   const windows = wake < bed ? [[wake, bed]] : [[0, bed], [wake, 1439]];
-  const busy = [...eventsForDay(day), ...blocked.filter(event => event.day === day)]
-    .filter(event => event.id !== skipId && (event.kind !== 'lesson' || event.attending))
-    .map(event => {
-      const start = clockMinutes(event.time);
-      return [start, event.endTime ? clockMinutes(event.endTime) : start + 60];
-    });
+  const rules = planningRules();
+  const taskSlots = state.tasks.filter(task => !task.done && task.day === day && task.plannedTime && task.plannedEnd)
+    .map(task => ({ id: task.id, kind: 'study', time: task.plannedTime, endTime: task.plannedEnd, attending: true }));
+  const events = [...eventsForDay(day), ...taskSlots, ...blocked.filter(event => event.day === day)]
+    .filter(event => event.id !== skipId && (event.kind !== 'lesson' || event.attending));
+  const used = events.filter(event => event.kind === 'study').reduce((sum, event) => {
+    const duration = event.endTime ? clockMinutes(event.endTime) - clockMinutes(event.time) : 60;
+    return sum + duration;
+  }, 0);
+  if (used + minutes > rules.dailyStudyMinutes) return null;
+  const busy = events.map(event => {
+    const start = clockMinutes(event.time);
+    const end = event.endTime ? clockMinutes(event.endTime) : start + 60;
+    const buffer = ['lesson', 'workout'].includes(event.kind) ? rules.travelMinutes : rules.breakMinutes;
+    return [start - buffer, end + buffer];
+  });
+  for (const meal of rules.meals) {
+    const start = clockMinutes(meal);
+    busy.push([start, start + rules.mealMinutes]);
+  }
   for (const entry of state.assessments) {
     if (entry.day === day && entry.kind !== 'deadline') {
       const start = clockMinutes(entry.time);
-      busy.push([start, start + 60]);
+      busy.push([start - rules.travelMinutes, start + 60 + rules.travelMinutes]);
     }
   }
-  const earliest = day === activeDay() ? nowMinutes() + 1 : 0;
+  const earliest = Math.max(minimumStart, day === activeDay() ? nowMinutes() + 1 : 0);
   for (const [from, to] of windows) {
     const end = Math.min(to, day === deadline.day ? clockMinutes(deadline.time) : 1439);
     for (let start = Math.ceil(Math.max(from, earliest) / 15) * 15; start + minutes <= end; start += 15) {
@@ -368,7 +409,7 @@ function freeStudySlot(day, minutes, deadline, blocked, skipId) {
 }
 
 function studyProposal() {
-  const items = orderedAssessments().flatMap(entry => entry.topics
+  const items = orderedAssessments().filter(entry => entry.grade === null).flatMap(entry => orderedTopics(entry.course, entry.topics)
     .filter(topic => !state.events.some(event => event.assessmentId === entry.id && event.topic === topic))
     .map(topic => ({ entry, topic })));
   const blocks = [];
@@ -400,20 +441,25 @@ function balancedStudyProposal() {
   const blocks = [];
   let unavailable = 0;
   const courses = coursePriorities().map(course => {
-    const topics = course.exam?.topics.length ? course.exam.topics : topicsForCourse(course.title);
+    const topics = orderedTopics(course.title, course.exam?.topics.length ? course.exam.topics : topicsForCourse(course.title));
     const covered = new Set(state.events.filter(event => isPlannedStudy(event) &&
       courseKey(event.detail) === course.key && (event.studyDone || days.includes(event.day))).map(event => event.topic));
     const pending = topics.filter(topic => !covered.has(topic));
     const planned = existing.filter(event => courseKey(event.detail) === course.key);
-    const target = course.sessions.reduce((sum, minutes) => sum + minutes, 0);
+    const sessions = masterySessions(course);
+    const target = sessions.reduce((sum, minutes) => sum + minutes, 0);
     const allocated = planned.reduce((sum, block) => sum + clockMinutes(block.endTime) - clockMinutes(block.time), 0);
-    return { ...course, topics: [...pending, ...topics.filter(topic => covered.has(topic))],
+    return { ...course, sessions, topics: [...pending, ...topics.filter(topic => covered.has(topic))],
       practiceOnly: !pending.length, planned, remaining: Math.max(0, target - allocated), added: 0 };
   });
 
   for (let round = 0; round < 3; round += 1) {
     for (const course of courses) {
-      const minutes = Math.min(course.sessions[round] ?? 0, course.remaining);
+      if (!course.sessions[round]) continue;
+      const topic = course.topics[course.added % course.topics.length] ?? 'Son dersin tekrarı ve alıştırmalar';
+      const mastery = topicMastery(course.title, topic);
+      const length = mastery === 'unknown' ? Math.max(45,course.sessions[round] ?? 0) : mastery === 'known' ? 30 : 45;
+      const minutes = Math.min(length, course.remaining);
       if (!minutes) continue;
       const deadline = course.exam ?? { day: days.at(-1), time: '23:59' };
       const dailyLoad = day => [...existing, ...blocks].filter(event => event.day === day).length;
@@ -428,8 +474,7 @@ function balancedStudyProposal() {
         unavailable += 1;
         continue;
       }
-      const topic = course.topics[course.added % course.topics.length] ?? 'Son dersin tekrarı ve alıştırmalar';
-      const phase = course.added === 0 && !course.practiceOnly ? 'learn' : 'practice';
+      const phase = mastery === 'unknown' && course.added === 0 && !course.practiceOnly ? 'learn' : 'practice';
       blocks.push({
         ...slot, id: newId(), kind: 'study', attending: true, focusPlan: true, phase, topic, title: topic, detail: course.title,
         ...(course.exam ? { assessmentId: course.exam.id } : {}),
@@ -440,6 +485,90 @@ function balancedStudyProposal() {
   }
   blocks.sort((a, b) => (a.day + a.time).localeCompare(b.day + b.time));
   return { blocks, unavailable };
+}
+
+function masterySessions(course) {
+  const topics = course.exam?.topics.length ? course.exam.topics : topicsForCourse(course.title);
+  if (topics.some(topic => topicMastery(course.title, topic) === 'unknown')) {
+    return course.sessions.map(minutes => Math.max(45, minutes));
+  }
+  if (topics.length && topics.every(topic => topicMastery(course.title, topic) === 'known')) {
+    return course.sessions.map(minutes => Math.min(30, minutes));
+  }
+  return course.sessions;
+}
+
+function redistributionProposal() {
+  const today = activeDay();
+  const lastDay = shiftDay(today, 6);
+  const missedStudies = state.events.filter(event => isPlannedStudy(event) && !event.studyDone &&
+    (event.day < today || event.day === today && clockMinutes(event.endTime) <= nowMinutes()));
+  const missedTasks = state.tasks.filter(task => !task.done &&
+    (task.day < today || task.day === today && task.plannedEnd && clockMinutes(task.plannedEnd) <= nowMinutes()));
+  const candidates = [
+    ...missedStudies.map(record => ({ record, type: 'study' })),
+    ...missedTasks.map(record => ({ record, type: 'task' })),
+  ];
+  const moves = [];
+  const blocked = [];
+  for (const item of candidates) {
+    const record = item.record;
+    const exam = record.assessmentId ? state.assessments.find(entry => entry.id === record.assessmentId) : null;
+    let deadline = exam ?? { day: lastDay, time: '23:59' };
+    if (item.type === 'task' && (record.deadline || record.dueTime)) {
+      deadline = { day: record.day, time: record.dueTime || '23:59' };
+    }
+    let minutes = 30;
+    if (item.type === 'study') {
+      minutes = clockMinutes(record.endTime) - clockMinutes(record.time);
+    } else if (record.plannedTime && record.plannedEnd) {
+      minutes = clockMinutes(record.plannedEnd) - clockMinutes(record.plannedTime);
+    }
+    let slot;
+    for (let day = today; day <= lastDay && day <= deadline.day; day = shiftDay(day, 1)) {
+      slot = freeStudySlot(day, minutes, deadline, blocked, record.id);
+      if (slot) break;
+    }
+    if (!slot) continue;
+    const snapshot = JSON.stringify(record);
+    moves.push({ id: record.id, type: item.type, title: record.title, from: record.day, snapshot, ...slot });
+    blocked.push({ ...slot, id: record.id, kind: 'study', attending: true });
+  }
+  return { moves, unavailable: candidates.length - moves.length };
+}
+
+function previewRedistribution() {
+  proposal = redistributionProposal();
+  const fields = proposal.moves.length ? `<ul class="proposal-list">${proposal.moves.map(move => `<li><strong>${escapeText(move.title)}</strong>
+    <span>${dayFormat.format(dateFor(move.from))} → ${dayFormat.format(dateFor(move.day))} · ${move.time}–${move.endTime}</span></li>`).join('')}</ul>` :
+    '<p class="form-feedback">Taşınabilecek iş yok veya kalan zamanda uygun boşluk bulunamadı.</p>';
+  plannerModal('redistribute', 'Kaçan işleri yeniden dağıt', fields, 'Değişiklikleri uygula');
+  plannerSubmit.disabled = proposal.moves.length === 0;
+  if (proposal.unavailable) plannerFeedback.textContent = `${proposal.unavailable} iş için uygun zaman yok. Mevcut kayıtları korunacak.`;
+}
+
+function applyRedistribution() {
+  let changed = 0;
+  for (const move of proposal.moves) {
+    const records = move.type === 'task' ? state.tasks : state.events;
+    const record = records.find(entry => entry.id === move.id);
+    if (!record || JSON.stringify(record) !== move.snapshot || record.done || record.studyDone) continue;
+    const deadline = { day: move.day, time: move.endTime };
+    const minutes = clockMinutes(move.endTime) - clockMinutes(move.time);
+    const available = freeStudySlot(move.day, minutes, deadline, [], record.id, clockMinutes(move.time));
+    if (!available || available.time !== move.time) continue;
+    const exam = state.assessments.find(entry => entry.id === record.assessmentId);
+    if (exam && move.day + move.endTime > exam.day + exam.time) continue;
+    if (move.type === 'task') {
+      record.postponements ??= [];
+      record.postponements.push({ changedOn: activeDay(), from: record.day, to: move.day });
+      Object.assign(record, { day: move.day, plannedTime: move.time, plannedEnd: move.endTime });
+    } else {
+      Object.assign(record, { day: move.day, time: move.time, endTime: move.endTime });
+    }
+    changed += 1;
+  }
+  return changed;
 }
 
 function showStudyProposal(record, balanced = false) {
@@ -674,6 +803,7 @@ document.addEventListener('click', event => {
       break;
     case 'plan-topics': showStudyProposal(null); break;
     case 'balance-study': showStudyProposal(null, true); break;
+    case 'redistribute': previewRedistribution(); break;
     case 'reschedule-study': showStudyProposal(state.events.find(entry => entry.id === id)); break;
     case 'start-focus': startFocusEditor(null, false); break;
     case 'focus-task': startFocusEditor(state.tasks.find(task => task.id === id), false); break;
@@ -739,6 +869,9 @@ plannerForm.addEventListener('submit', event => {
       if (plannerRecord) Object.assign(plannerRecord, proposal.blocks[0]);
       else state.events.push(...proposal.blocks);
       break;
+    case 'redistribute':
+      applyRedistribution();
+      break;
     case 'focus': {
       const title = data.get('title').trim();
       if (!title) {
@@ -759,3 +892,18 @@ plannerForm.addEventListener('submit', event => {
 });
 
 setInterval(updateFocusClock, 1000);
+
+document.addEventListener('submit', event => {
+  if (event.target.id !== 'planning-settings') return;
+  event.preventDefault();
+  const data = new FormData(event.target);
+  state.planning = {
+    travelMinutes: Number(data.get('travelMinutes')),
+    breakMinutes: Number(data.get('breakMinutes')),
+    dailyStudyMinutes: Number(data.get('dailyStudyMinutes')),
+    mealMinutes: Number(data.get('mealMinutes')),
+    meals: [0, 1, 2].map(index => data.get('meal' + index)),
+  };
+  save('Zaman ayarları kaydedildi.');
+  render();
+});
