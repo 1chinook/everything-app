@@ -2,8 +2,6 @@ const relationshipKey = 'everything-app-relationship-v1';
 const sleepHabitsKey = 'everything-app-sleep-habits-v1';
 let relationshipEntries = readPersonal(relationshipKey, []);
 let editingRelationship;
-let musicPicks = null;
-let musicStart;
 let musicLoading = false;
 let musicMessage = '';
 let musicStatus;
@@ -20,7 +18,7 @@ function writePersonal(key, value) {
 function relationshipPage() {
   const record = relationshipEntries.find(entry => entry.id === editingRelationship);
   const records = [...relationshipEntries].sort((a, b) => (a.day || '9999').localeCompare(b.day || '9999'));
-  return `${intro('Kız arkadaş', 'Birlikte yapacaklarınızı, özel günleri ve fikirleri kaydet.')}
+  return `${intro('Birlikte planlar', 'Birlikte yapacaklarınızı, özel günleri ve fikirleri kaydet.')}
     <section class="panel page-panel">
       ${panelHeading(record ? 'Kaydı düzenle' : 'Yeni kayıt', 'Bu sekmedeki kayıtlar bu tarayıcıda tutulur.')}
       <form id="relationship-form" class="sync-content form-fields">
@@ -50,7 +48,7 @@ function sleepQuality(sleep) {
     ['routine', `Hafta sonu da dahil olmak üzere ${sleep.bedtime} yatış ve ${sleep.wake} kalkış düzenine yakın kal.`],
     ['screen', `${windDown} civarında ekranları kapatıp düşük ışığa geç.`],
     ['caffeine', 'Kahve, çay ve enerji içeceklerindeki kafeini öğleden sonraya ve akşama bırakma.'],
-    ['room', 'Odayı serin, karanlık ve sessiz tut. Yurtta gerekiyorsa göz maskesi kullan veya oda arkadaşınla sessizlik saatini konuş.'],
+    ['room', 'Odayı serin, karanlık ve sessiz tut.'],
     ['meal', 'Yatmaya yakın büyük öğünlerden kaçın.'],
   ];
   return `<section class="panel page-panel planning-panel">
@@ -63,12 +61,11 @@ function sleepQuality(sleep) {
 }
 
 function dailyMusicCard() {
-  const index = Math.max(0, Math.floor((dateFor(activeDay()).valueOf() - (musicStart ?? 0)) / 86400000));
-  const pick = musicStatus?.track ?? (musicPicks?.length ? musicPicks[index % musicPicks.length] : null);
+  const pick = musicStatus?.track ?? null;
   const detail = pick
-    ? `<strong>${escapeText(pick.title)}</strong><p class="row-meta">${escapeText(pick.artist)} · ${musicStatus?.track ? 'Bugün Spotify’dan seçildi' : 'Önceki kişisel seçkiden'}</p>
-      <a class="button secondary" href="${escapeText(pick.url)}" target="_blank" rel="noopener noreferrer">Spotify’da aç</a>`
-    : `<p class="row-meta">${escapeText(musicMessage || 'Spotify önerileri yükleniyor.')}</p>`;
+    ? `<strong>${escapeText(pick.title)}</strong><p class="row-meta">${escapeText(pick.artist)} · ${escapeText(pick.reason || 'Spotify keşif önerisi')}</p>
+      <div class="sync-actions"><a class="button secondary" href="${escapeText(pick.url)}" target="_blank" rel="noopener noreferrer">Spotify’da aç</a><button class="button secondary" data-music-discover data-reject="${escapeText(pick.id ?? '')}" ${musicLoading?'disabled':''}>Bunu biliyorum · Değiştir</button></div>`
+    : `<p class="row-meta">${escapeText(musicStatus?.message || musicMessage || 'Spotify önerileri yükleniyor.')}</p>`;
   const setup = musicStatus?.configured && !musicStatus.connected
     ? '<a class="button secondary" href="/api/music/connect">Spotify’a bağlan</a>'
     : musicStatus?.configured === false ? `<details class="preference">
@@ -77,10 +74,52 @@ function dailyMusicCard() {
       <li>Redirect URI olarak <code>http://127.0.0.1:4173/api/music/callback</code> adresini ekle.</li>
       <li>Proje klasöründe <code>spotify-config.local.json</code> dosyası oluştur ve içine <code>{"clientId":"..."} </code> yaz.</li>
       <li>Sunucuyu yeniden başlat ve Spotify’a bağlan.</li></ol></details>` : '';
-  const notice = musicStatus?.message || (musicStatus?.connected && !musicStatus.track ? 'Spotify otomasyonu bugünkü parçayı hazırlıyor.' : '');
-  return `<section class="panel planning-panel" id="daily-music" data-day="${activeDay()}">${panelHeading('Günün müziği')}<div class="sync-content">${detail}
-    ${setup}${notice ? `<p class="row-meta">${escapeText(notice)}</p>` : ''}</div></section>`;
+  const notice = pick ? musicStatus?.message : '';
+  const preferences = musicStatus?.connected ? `<details class="books-section" ${!pick?'open':''}><summary>Keşif türleri</summary><form id="music-genres-form" class="sync-form books-section">${field('Sevdiğin türler (virgülle ayır)',`<input name="genres" maxlength="480" value="${escapeText((musicStatus.genres ?? []).join(', '))}" placeholder="alternative rock, indie rock, jazz">`)}<p class="row-meta">Boş bırakırsan Spotify’ın sağladığı türler kullanılır. Sevdiğin sanatçıların farklı parçalarıyla bu türlerden keşifler dönüşümlü sunulur.</p><button class="button secondary" type="submit" ${musicLoading?'disabled':''}>Kaydet ve yeni parça bul</button></form></details>` : '';
+  return `<section class="panel planning-panel" id="daily-music" data-day="${activeDay()}">${panelHeading('Günün müziği')}<div class="sync-content">${detail}${preferences}
+    ${setup}${notice ? `<p class="row-meta">${escapeText(notice)}</p>` : ''}<p id="music-action-feedback" class="row-meta" role="status"></p></div></section>`;
 }
+
+async function requestMusicDiscovery(body, control) {
+  if (musicLoading) return;
+  musicLoading=true;
+  control.disabled=true;
+  const feedback=document.querySelector('#music-action-feedback');
+  feedback.textContent='Yeni bir sanatçı aranıyor…';
+  try {
+    const response=await fetch('/api/music/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(60000)});
+    if(!response.ok) throw Object.assign(new Error('music'),{status:response.status});
+    const data=await response.json();
+    if(data.track && !/^https:\/\/open\.spotify\.com\/track\/[A-Za-z0-9]+$/.test(data.track.url ?? '')) throw new Error('track');
+    musicStatus={...data,genres:Array.isArray(data.genres)?data.genres:[]};
+    musicCheckedAt=Date.now();
+    musicMessage=data.track?'':'Henüz uygun bir keşif bulunamadı.';
+    musicLoading=false;
+    const card=document.querySelector('#daily-music');
+    if(card)card.outerHTML=dailyMusicCard();
+  } catch(error) {
+    feedback.textContent=error.status===404
+      ? 'Eski sunucu sürümü çalışıyor. Proje klasöründeki restart-app.vbs dosyasını açıp bu sayfayı yenile.'
+      : error.status===400 ? 'Keşif türleri geçersiz. En fazla 8 türü virgülle ayırarak gir.'
+      : error.status===403 ? 'Bu işlem yalnızca uygulamanın bu bilgisayardaki 127.0.0.1 adresinde kullanılabilir.'
+      : 'Öneri isteği tamamlanamadı. Bağlantını kontrol edip tekrar dene.';
+  } finally {musicLoading=false;control.disabled=false;}
+}
+
+document.addEventListener('click',event=> {
+  const control=event.target.closest('[data-music-discover]');
+  if(control)void requestMusicDiscovery({rejectId:control.dataset.reject || undefined},control);
+});
+document.addEventListener('submit',event=> {
+  if(event.target.id!=='music-genres-form')return;
+  event.preventDefault();
+  const genres=new FormData(event.target).get('genres').split(',').map(g=>g.trim()).filter(Boolean);
+  if(genres.length>8 || genres.some(g=>g.length>60)) {
+    document.querySelector('#music-action-feedback').textContent='En fazla 8 tür gir. Her tür en fazla 60 karakter olabilir.';
+    return;
+  }
+  void requestMusicDiscovery({genres},event.target.querySelector('[type="submit"]'));
+});
 
 async function refreshDailyMusic() {
   if (musicLoading || Date.now() - musicCheckedAt < 55000 || !document.querySelector('#daily-music')) return;
@@ -90,14 +129,11 @@ async function refreshDailyMusic() {
     if (location.protocol === 'file:') throw new Error('local');
     const response = await fetch('/api/music', { signal: AbortSignal.timeout(4000) });
     if (!response.ok) throw new Error('music');
-    const { tracks = [], start, track, configured, connected, message } = await response.json();
-    musicStart = start ? dateFor(start).valueOf() : 0;
+    const { track, configured, connected, message, genres } = await response.json();
     const isTrack = value => value && typeof value.title === 'string' && typeof value.artist === 'string' &&
       /^https:\/\/open\.spotify\.com\/track\/[A-Za-z0-9]+(?:\?|$)/.test(value.url);
-    musicStatus = { track: isTrack(track) ? track : null, configured, connected, message };
-    musicPicks = tracks.filter(isTrack);
+    musicStatus = { track: isTrack(track) ? track : null, configured, connected, message, genres: Array.isArray(genres)?genres:[] };
     musicMessage = connected ? 'Bugünkü parça henüz hazır değil.' : 'Spotify bağlantısı bekleniyor.';
-    if (!musicPicks.length) musicMessage = 'Kişisel öneri listesi bu cihazda yok.';
   } catch {
     musicMessage = 'Bu bilgisayarda node server.js çalıştırıp http://127.0.0.1:4173 adresini aç.';
   } finally {

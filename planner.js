@@ -3,12 +3,10 @@ const plannerForm = document.querySelector('#planner-form');
 const plannerFeedback = document.querySelector('#planner-feedback');
 const plannerSubmit = document.querySelector('#planner-submit');
 const plannerClock = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-const focusStorageKey = 'everything-app-focus-timer';
 let plannerMode;
 let plannerRecord;
 let proposal;
 let activeGradeCourse;
-let focusTimer = readFocusTimer();
 
 function activeDay() {
   return keyFormat.format(new Date());
@@ -44,8 +42,8 @@ function plannerModal(mode, title, fields, submit = 'Kaydet', record = null) {
 }
 
 const gradeTypes = {
-  midterm: { label: 'Vize', weight: 37.5 },
-  quiz: { label: 'Kısa sınav', weight: 12.5 },
+  midterm: { label: 'Vize', weight: 30 },
+  quiz: { label: 'Kısa sınav', weight: 20 },
   final: { label: 'Final / bütünleme', weight: 50 },
 };
 
@@ -75,14 +73,14 @@ function dueDescription(entry) {
   return `${days} gün kaldı`;
 }
 
-function orderedAssessments() {
-  return [...state.assessments].sort((a, b) => (a.day + a.time).localeCompare(b.day + b.time));
+function orderedAssessments(includePastTypes = false) {
+  return state.assessments.filter(entry => includePastTypes || activeAssessment(entry)).sort((a, b) => (a.day + a.time).localeCompare(b.day + b.time));
 }
 
 function calendarEntries() {
   const tasks = state.tasks.filter(task => !task.done && (task.dueTime || task.deadline))
     .map(task => ({ ...task, time: task.dueTime || '23:59', course: task.course || 'Görev', kind: 'task' }));
-  return [...state.assessments, ...tasks].sort((a, b) => (a.day + a.time).localeCompare(b.day + b.time));
+  return [...state.assessments.filter(activeAssessment), ...tasks].sort((a, b) => (a.day + a.time).localeCompare(b.day + b.time));
 }
 
 function assessmentRows(entries, edit = false) {
@@ -91,7 +89,7 @@ function assessmentRows(entries, edit = false) {
     <li class="record-row planning-row">
       ${icon('calendar', 'tile-icon')}
       <div><strong class="row-title">${escapeText(entry.title)}</strong>
-      <small class="row-meta">${escapeText(entry.course)} · ${dayFormat.format(dateFor(entry.day))} · ${entry.time}${entry.grade != null ? ` · ${formatGrade(entry.grade)}/100` : ''}</small></div>
+      <small class="row-meta">${escapeText(entry.course)} · ${dayFormat.format(dateFor(entry.day))} · ${entry.time}${entry.endTime ? '–'+escapeText(entry.endTime) : ''}${entry.room ? ' · '+escapeText(entry.room) : ''}${entry.grade != null ? ` · ${formatGrade(entry.grade)}/100` : ''}</small></div>
       <span class="pill">${edit ? assessmentType(entry) : dueDescription(entry)}</span>
       ${edit ? entry.kind === 'task' ? editButton('task', entry) : plannerButton('edit-assessment', 'Düzenle', entry.id) : ''}
     </li>`).join('')}</ul>`;
@@ -99,12 +97,13 @@ function assessmentRows(entries, edit = false) {
 
 function assessmentsPage() {
   const entries = calendarEntries();
-  return `${intro('Sınav ve teslimler', 'Tarihleri, değerlendirme ağırlıklarını ve çalışacağın konuları kaydet.')}
+  return `${intro('Final takvimi ve teslimler', 'Final günlerini ve teslim tarihlerini buradan düzenle.')}
+    ${finalPeriodBanner(false)}
     <section class="panel page-panel">
       ${panelHeading('Takvim', '', plannerButton('add-assessment', 'Kayıt ekle', '', 'plus'))}
       ${assessmentRows(entries, true)}
     </section>
-    ${weightedGrades()}`;
+    `;
 }
 
 function courseKey(course) {
@@ -172,7 +171,7 @@ function coursePriorities() {
   const evaluations = new Map(weightedCourses().map(course => [course.key, course]));
   const previous = new Map(state.grades.map(grade => [courseKey(grade.title), grade.value]));
   const upcoming = orderedAssessments().filter(entry => entry.grade === null && dueDescription(entry) !== 'Süresi geçti');
-  const titles = new Map(courseCatalog.map(([title]) => [courseKey(title), title]));
+  const titles = new Map(enrolledCourseNames().map((title) => [courseKey(title), title]));
   for (const { key, course } of evaluations.values()) if (!titles.has(key)) titles.set(key, course.name);
   return [...titles].map(([key, title]) => {
     const evaluation = evaluations.get(key);
@@ -180,16 +179,13 @@ function coursePriorities() {
     const observed = gradedWeight ? earned * 100 / gradedWeight : previous.get(key) ?? null;
     const remaining = Math.max(0, 100 - gradedWeight);
     const required = gradedWeight && remaining > 1e-5 ? Math.max(0, (passingScore - earned) * 100 / remaining) : null;
-    const quizzes = course?.entries.filter(entry => entry.kind === 'quiz') ?? [];
-    const quizPending = quizzes.length === 0 || quizzes.some(entry => entry.grade === null);
     const low = observed !== null && observed < passingScore;
     const impossible = required !== null && required > 100 + 1e-5;
-    const level = impossible || (low && quizPending && remaining > 1e-5) || (required ?? 0) >= 80 ? 2
+    const level = impossible || (required ?? 0) >= 80 ? 2
       : low || (required ?? 0) >= 65 ? 1 : 0;
-    const badge = low && quizPending && remaining > 1e-5 ? 'Düşük not · Kısa sınav eksik' : level === 2 ? 'Yüksek öncelik' : 'Ek çalışma önerilir';
+    const badge = level === 2 ? 'Yüksek öncelik' : 'Ek çalışma önerilir';
     const reason = [];
     if (observed !== null) reason.push(`Girilen notların ortalaması ${formatGrade(observed)}/100.`);
-    if (low && quizPending && remaining > 1e-5) reason.push('Kısa sınav notu eksik. Kapsam ve tarihi kontrol et, kısa sınava ayrıca hazırlan.');
     if (impossible) reason.push('Kalan puanlarla 60’a ulaşmak mümkün görünmüyor. Girilen notları ve bütünleme seçeneğini kontrol et.');
     else if (remaining <= 1e-5 && low) reason.push('Dönem puanı 60’ın altında.');
     const exam = upcoming.find(entry => courseKey(entry.course) === key);
@@ -293,25 +289,27 @@ function formatGrade(value) {
 }
 
 function editAssessment(entry, gradeEntry = false, presetCourse = '') {
-  const kind = entry?.kind ?? (gradeEntry ? 'midterm' : 'exam');
-  const options = Object.entries({ midterm: 'Vize (%37,5)', quiz: 'Kısa sınav (%12,5)', final: 'Final / bütünleme (%50)', exam: 'Diğer sınav', deadline: 'Teslim' });
+  const kind = entry?.kind ?? (gradeEntry ? 'midterm' : 'final');
+  const options = Object.entries({ midterm: 'Vize (%30)', quiz: 'Kısa sınav (%20)', final: 'Final / bütünleme (%50)', exam: 'Diğer sınav', deadline: 'Teslim' });
   const weight = gradeType(kind)?.weight ?? entry?.weight;
   const course = entry?.course ?? presetCourse;
   plannerModal('assessment', entry ? 'Not veya takvim kaydını düzenle' : gradeEntry ? 'Ders notu gir' : 'Sınav veya teslim ekle',
     courseField('Ders', course, true) +
     inputField('Başlık (isteğe bağlı)', 'title', entry?.title, 'maxlength="100"') +
     field('Tür', `<select name="kind">${options
-      .filter(([value]) => !gradeEntry || gradeType(value))
+      .filter(([value]) => gradeEntry ? gradeType(value) : !['midterm','quiz'].includes(value) || entry?.kind === value)
       .map(([value, label]) => `<option value="${value}" ${value === kind ? 'selected' : ''}>${label}</option>`).join('')}</select>`) +
     `<div class="time-fields">${inputField('Tarih', 'day', entry?.day ?? selectedDay, 'type="date" required')}
     ${inputField('Saat', 'time', entry?.time ?? '17:00', 'type="time" required')}</div>` +
+    `<div class="time-fields">${inputField('Bitiş saati (isteğe bağlı)', 'endTime', entry?.endTime, 'type="time"')}
+    ${inputField('Derslik (isteğe bağlı)', 'room', entry?.room, 'maxlength="100"')}</div>` +
     `<div class="assessment-numbers">
       ${inputField('Ağırlık (%)', 'weight', weight || '', `type="number" min="0" max="100" step="0.1" ${gradeType(kind) ? 'readonly' : ''}`)}
       ${inputField('Alınan not', 'grade', entry?.grade, 'type="number" min="0" max="100" step="0.1"')}
       ${inputField('Ders hedefi', 'target', entry ? state.targets[courseKey(entry.course)] : '', 'type="number" min="0" max="100" placeholder="60"')}
     </div>` +
-    field('Çalışılacak konular, her satıra bir konu', `<textarea name="topics" rows="3" maxlength="1000">${escapeText(entry?.topics.join('\n') ?? '')}</textarea>`) +
-    `<div id="assessment-topic-choices">${topicChoices(course)}</div>`,
+    `<div id="assessment-topic-editor" ${kind === 'final' ? 'hidden' : ''}>` + field('Çalışılacak konular, her satıra bir konu', `<textarea name="topics" rows="3" maxlength="1000">${escapeText(entry?.topics.join('\n') ?? '')}</textarea>`) +
+    `<div id="assessment-topic-choices">${topicChoices(course)}</div></div><p id="final-topic-note" ${kind === 'final' ? '' : 'hidden'}>Final hazırlığında dersin bütün konuları kullanılır. Konu takibini Final konuları ekranından yapabilirsin.</p>`,
     'Kaydet', entry);
 }
 
@@ -327,12 +325,21 @@ function saveAssessment(data) {
   if (kind === 'final' && other.some(entry => entry.kind === 'final')) return 'Bu dersin final / bütünleme kaydını düzenleyebilirsin.';
   if (Math.round(gradeWeights([...other, { kind, weight }]).total * 10) > 1000) return 'Aynı dersin toplam ağırlığı %100’ü geçemez.';
   const grade = data.get('grade') === '' ? null : Number(data.get('grade'));
-  const topics = topicLines(data.get('topics'));
+  const topics = kind === 'final' ? [] : topicLines(data.get('topics'));
   const fields = { title, course, weight, grade, topics, kind, day: data.get('day'), time: data.get('time') };
+  const endTime = data.get('endTime') || '';
+  const room = (data.get('room') || '').trim();
+  if (endTime && endTime <= fields.time) return 'Bitiş saati başlangıçtan sonra olmalı.';
+  if (endTime) fields.endTime = endTime;
+  if (room) fields.room = room;
   if (plannerRecord) {
+    delete plannerRecord.endTime;
+    delete plannerRecord.room;
+    const sameCourse = courseKey(plannerRecord.course) === key;
+    const keptTopics = new Set(assessmentTopics(fields));
     Object.assign(plannerRecord, fields);
     state.events = state.events.filter(event => event.assessmentId !== plannerRecord.id || event.studyDone ||
-      (topics.includes(event.topic) && event.day + event.endTime <= fields.day + fields.time));
+      (sameCourse && keptTopics.has(event.topic) && event.day + event.endTime <= fields.day + fields.time));
   } else {
     state.assessments.push({ id: newId(), ...fields });
   }
@@ -341,7 +348,7 @@ function saveAssessment(data) {
 }
 
 function studyControls(event) {
-  return event.studyDone ? '<span class="pill mint">Tamamlandı</span>' : plannerButton('focus-study', 'Odaklan', event.id, 'timer');
+  return `<label class="daily-control"><input type="checkbox" data-daily-study="${escapeText(event.id)}" ${event.studyDone ? 'checked' : ''}><span>Tamamladım</span></label>`;
 }
 
 function dashboardPlanning() {
@@ -391,9 +398,9 @@ function freeStudySlot(day, minutes, deadline, blocked, skipId, minimumStart = 0
     busy.push([start, start + rules.mealMinutes]);
   }
   for (const entry of state.assessments) {
-    if (entry.day === day && entry.kind !== 'deadline') {
+    if (entry.day === day && entry.kind !== 'deadline' && activeAssessment(entry)) {
       const start = clockMinutes(entry.time);
-      busy.push([start - rules.travelMinutes, start + 60 + rules.travelMinutes]);
+      busy.push([start - rules.travelMinutes, (entry.endTime ? clockMinutes(entry.endTime) : start + 90) + rules.travelMinutes]);
     }
   }
   const earliest = Math.max(minimumStart, day === activeDay() ? nowMinutes() + 1 : 0);
@@ -409,7 +416,7 @@ function freeStudySlot(day, minutes, deadline, blocked, skipId, minimumStart = 0
 }
 
 function studyProposal() {
-  const items = orderedAssessments().filter(entry => entry.grade === null).flatMap(entry => orderedTopics(entry.course, entry.topics)
+  const items = orderedAssessments().filter(entry => entry.grade === null).flatMap(entry => orderedTopics(entry.course, assessmentTopics(entry))
     .filter(topic => !state.events.some(event => event.assessmentId === entry.id && event.topic === topic))
     .map(topic => ({ entry, topic })));
   const blocks = [];
@@ -441,7 +448,7 @@ function balancedStudyProposal() {
   const blocks = [];
   let unavailable = 0;
   const courses = coursePriorities().map(course => {
-    const topics = orderedTopics(course.title, course.exam?.topics.length ? course.exam.topics : topicsForCourse(course.title));
+    const topics = orderedTopics(course.title, course.exam ? assessmentTopics(course.exam) : topicsForCourse(course.title));
     const covered = new Set(state.events.filter(event => isPlannedStudy(event) &&
       courseKey(event.detail) === course.key && (event.studyDone || days.includes(event.day))).map(event => event.topic));
     const pending = topics.filter(topic => !covered.has(topic));
@@ -488,7 +495,7 @@ function balancedStudyProposal() {
 }
 
 function masterySessions(course) {
-  const topics = course.exam?.topics.length ? course.exam.topics : topicsForCourse(course.title);
+  const topics = course.exam ? assessmentTopics(course.exam) : topicsForCourse(course.title);
   if (topics.some(topic => topicMastery(course.title, topic) === 'unknown')) {
     return course.sessions.map(minutes => Math.max(45, minutes));
   }
@@ -640,120 +647,36 @@ function showQuickReview(entry) {
     ${inputField('Teslim saati', 'time', entry.time, 'type="time"')}</div>`);
 }
 
-function readFocusTimer() {
-  try {
-    return JSON.parse(localStorage.getItem(focusStorageKey));
-  } catch {
-    return null;
-  }
-}
-
-function setFocusTimer(timer) {
-  focusTimer = timer;
-  try {
-    if (timer) localStorage.setItem(focusStorageKey, JSON.stringify(timer));
-    else localStorage.removeItem(focusStorageKey);
-  } catch {
-    // The active timer still runs in memory.
-  }
-}
-
-function focusPage() {
-  const tasks = state.tasks.filter(task => !task.done).sort((a, b) => a.day.localeCompare(b.day));
-  const timer = focusTimer;
-  const controls = timer
-    ? `<div class="focus-clock"><div class="row-title">${escapeText(timer.title)}</div><strong id="focus-countdown" role="timer">${timerLabel(timer)}</strong>
-      ${plannerButton('finish-focus', 'Oturumu bitir')}</div>`
-    : `<div class="focus-clock"><strong>25:00</strong>${plannerButton('start-focus', 'Serbest oturum', '', 'timer', true)}</div>`;
-  return `${intro('Odak', 'Bir görev seç ve ayırdığın süreyi takip et.')}
-    <section class="panel page-panel">${panelHeading('Odak zamanlayıcısı')}${controls}</section>
-    ${tasks.length && !timer ? `<section class="panel page-panel planning-panel">${panelHeading('Bekleyen görevler')}
-      <ul class="record-list">${tasks.map(task => `<li class="record-row"><div><strong class="row-title">${escapeText(task.title)}</strong>
-      <small class="row-meta">${dayFormat.format(dateFor(task.day))}</small></div>
-      ${plannerButton('focus-task', 'Başlat', task.id, 'timer')}</li>`).join('')}</ul></section>` : ''}
-    ${focusLogPanel(state.focusLogs.slice(-5).reverse())}`;
-}
-
-function focusLogPanel(logs) {
-  return `<section class="panel page-panel planning-panel">${panelHeading('Son odak oturumları')}
-    ${logs.length ? `<ul class="record-list">${logs.map(log => `<li class="record-row"><div><strong class="row-title">${escapeText(log.title)}</strong>
-      <small class="row-meta">${escapeText(log.course)} · ${dayFormat.format(dateFor(log.day))}</small></div>
-      <span class="pill">${durationLabel(log.seconds)} / ${log.planned} dk</span></li>`).join('')}</ul>` : empty('Henüz oturum kaydedilmedi.')}
-  </section>`;
-}
-
-function durationLabel(seconds) {
-  return seconds < 60 ? `${seconds} sn` : `${Math.floor(seconds / 60)} dk`;
-}
-
-function timerLabel(timer) {
-  const left = Math.max(0, Math.ceil((timer.ends - Date.now()) / 1000));
-  return `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`;
-}
-
-function finishFocus() {
-  if (!focusTimer) return;
-  const { started, ends, id, title, course, day, planned, studyId } = focusTimer;
-  const seconds = Math.max(0, Math.floor((Math.min(Date.now(), ends) - started) / 1000));
-  setFocusTimer(null);
-  if (!state.focusLogs.some(log => log.id === id)) {
-    state.focusLogs.push({ id, title, course, day, planned, seconds });
-    const study = state.events.find(event => event.id === studyId);
-    if (study && seconds >= planned * 60) study.studyDone = true;
-    save('Odak oturumu kaydedildi.');
-  }
-  if (!document.querySelector('dialog[open]')) render();
-}
-
-function updateFocusClock() {
-  if (!focusTimer) return;
-  if (Date.now() >= focusTimer.ends) {
-    finishFocus();
-    return;
-  }
-  const clock = document.querySelector('#focus-countdown');
-  if (clock) clock.textContent = timerLabel(focusTimer);
-}
-
-function startFocusEditor(record, study) {
-  if (focusTimer) {
-    location.hash = 'odak';
-    return;
-  }
-  const duration = study ? clockMinutes(record.endTime) - clockMinutes(record.time) : 25;
-  plannerModal('focus', 'Odak oturumu',
-    inputField('Görev veya çalışma konusu', 'title', record?.title ?? '', 'maxlength="100" required') +
-    courseField('Ders (isteğe bağlı)', study ? record.detail : record?.course) +
-    inputField('Süre (dk)', 'minutes', duration, 'type="number" min="1" max="180" required'), 'Başlat',
-    study ? record : null);
-}
-
 function weeklyPage() {
   const monday = shiftDay(selectedDay, -((weekday(selectedDay) + 6) % 7));
   const sunday = shiftDay(monday, 6);
   const inWeek = day => day >= monday && day <= sunday;
-  const logs = state.focusLogs.filter(log => inWeek(log.day));
   const byCourse = new Map();
-  for (const log of logs) {
-    const course = log.course || 'Ders belirtilmedi';
-    byCourse.set(course, (byCourse.get(course) ?? 0) + log.seconds);
+  for (const event of state.events.filter(event => inWeek(event.day) && isPlannedStudy(event) && event.studyDone)) {
+    const course = event.detail || 'Ders belirtilmedi';
+    const minutes = clockMinutes(event.endTime) - clockMinutes(event.time);
+    byCourse.set(course, (byCourse.get(course) ?? 0) + minutes);
   }
-  const workouts = Array.from({ length: 7 }, (_, index) => shiftDay(monday, index))
-    .flatMap(day => eventsForDay(day)).filter(event => event.kind === 'workout' && event.done).length;
+  const activities = Array.isArray(fitnessData.activities) ? fitnessData.activities : [];
+  const workoutDays = new Set(activities.filter(record => record && inWeek(record.day)).map(record => record.day));
+  for (let offset = 0; offset < 7; offset++) {
+    const day = shiftDay(monday, offset);
+    if (eventsForDay(day).some(event => event.kind === 'workout' && event.done)) workoutDays.add(day);
+  }
   const postponed = state.tasks.flatMap(task => {
     const latest = task.postponements?.filter(change => inWeek(change.changedOn)).at(-1);
     return latest ? [{ title: task.title, day: latest.to }] : [];
   });
   const range = `${dayFormat.format(dateFor(monday))} – ${dayFormat.format(dateFor(sunday))}`;
-  return `${intro('Haftalık özet', range, true)}
+  return `${intro('Haftalık özet', range)}
     <div class="metrics">
-      ${metric('timer', 'Odak süresi', durationLabel(logs.reduce((sum, log) => sum + log.seconds, 0)))}
-      ${metric('dumbbell', 'Tamamlanan antrenman', workouts, 'mint')}
+      ${metric('timer', 'Tamamlanan blokların plan süresi', [...byCourse.values()].reduce((sum, minutes) => sum + minutes, 0) + ' dk')}
+      ${metric('dumbbell', 'Spor yapılan gün', workoutDays.size, 'mint')}
       ${metric('calendar', 'Ertelenen görev', postponed.length, 'blue')}
     </div>
-    <section class="panel page-panel">${panelHeading('Derse göre odak süresi', '', `<div class="week-actions">
+    <section class="panel page-panel">${panelHeading('Tamamlanan çalışma blokları', '', `<div class="week-actions">
       ${plannerButton('previous-week', 'Önceki hafta')}${plannerButton('next-week', 'Sonraki hafta')}</div>`)}
-      ${byCourse.size ? `<ul class="record-list">${[...byCourse].sort((a, b) => b[1] - a[1]).map(([course, seconds]) => `<li class="record-row"><div class="row-title">${escapeText(course)}</div><span class="pill">${durationLabel(seconds)}</span></li>`).join('')}</ul>` : empty('Bu hafta odak oturumu kaydedilmedi.')}
+      ${byCourse.size ? `<ul class="record-list">${[...byCourse].sort((a, b) => b[1] - a[1]).map(([course, minutes]) => `<li class="record-row"><div class="row-title">${escapeText(course)}</div><span class="pill">${minutes} dk</span></li>`).join('')}</ul>` : empty('Bu hafta tamamlanan çalışma bloğu yok.')}
     </section>
     ${postponed.length ? `<section class="panel page-panel planning-panel">${panelHeading('Ertelenen görevler')}
       <ul class="record-list">${postponed.map(task => `<li class="record-row"><div class="row-title">${escapeText(task.title)}</div><span class="pill">${dayFormat.format(dateFor(task.day))}</span></li>`).join('')}</ul></section>` : ''}`;
@@ -767,18 +690,18 @@ document.addEventListener('click', event => {
   switch (action) {
     case 'close': plannerDialog.close(); break;
     case 'quick':
-      plannerModal('quick', 'Hızlı görev kaydı', inputField('Görevi doğal dille yaz', 'text', '', 'required autofocus maxlength="160" placeholder="Cuma 17.00’ye kadar Soyut Cebir 1 ödevi"'), 'Önizle');
+      plannerModal('quick', 'Hızlı görev kaydı', inputField('Görevi doğal dille yaz', 'text', '', 'required autofocus maxlength="160" placeholder="Cuma 17.00’ye kadar ders ödevi"'), 'Önizle');
       break;
     case 'add-assessment': editAssessment(null); break;
     case 'course-assessment': editAssessment(null, false, id); break;
     case 'edit-course-topics':
       plannerModal('course-topics', id, field('Her satıra bir konu yaz',
-        `<textarea name="topics" rows="9" maxlength="2500">${escapeText(topicsForCourse(id).join('\n'))}</textarea>`), 'Konuları kaydet', id);
+        `<textarea name="topics" rows="9" maxlength="15000">${escapeText(topicsForCourse(id).join('\n'))}</textarea>`), 'Konuları kaydet', id);
       break;
     case 'append-course-topic': {
       const textarea = plannerForm.elements.namedItem('topics');
       const topics = topicLines(textarea.value);
-      if (topics.includes(id)) {
+      if (topics.some(topic => topicKey(topic) === topicKey(id))) {
         plannerFeedback.textContent = 'Bu konu zaten listede.';
         break;
       }
@@ -805,10 +728,6 @@ document.addEventListener('click', event => {
     case 'balance-study': showStudyProposal(null, true); break;
     case 'redistribute': previewRedistribution(); break;
     case 'reschedule-study': showStudyProposal(state.events.find(entry => entry.id === id)); break;
-    case 'start-focus': startFocusEditor(null, false); break;
-    case 'focus-task': startFocusEditor(state.tasks.find(task => task.id === id), false); break;
-    case 'focus-study': startFocusEditor(state.events.find(entry => entry.id === id), true); break;
-    case 'finish-focus': finishFocus(); break;
     case 'previous-week':
     case 'next-week':
       selectedDay = shiftDay(selectedDay, action === 'previous-week' ? -7 : 7);
@@ -820,6 +739,8 @@ document.addEventListener('click', event => {
 
 plannerForm.addEventListener('change', event => {
   if (plannerMode !== 'assessment' || event.target.name !== 'kind') return;
+  document.querySelector('#assessment-topic-editor').hidden = event.target.value === 'final';
+  document.querySelector('#final-topic-note').hidden = event.target.value !== 'final';
   const preset = gradeType(event.target.value);
   const weight = plannerForm.elements.namedItem('weight');
   weight.readOnly = Boolean(preset);
@@ -863,7 +784,7 @@ plannerForm.addEventListener('submit', event => {
       break;
     }
     case 'course-topics':
-      state.courseTopics[courseKey(plannerRecord)] = topicLines(data.get('topics'));
+      state.courseTopics[courseKey(plannerRecord)] = groupCourseTopics(plannerRecord, topicLines(data.get('topics')), state);
       break;
     case 'proposal':
       if (plannerRecord) Object.assign(plannerRecord, proposal.blocks[0]);
@@ -872,26 +793,12 @@ plannerForm.addEventListener('submit', event => {
     case 'redistribute':
       applyRedistribution();
       break;
-    case 'focus': {
-      const title = data.get('title').trim();
-      if (!title) {
-        plannerFeedback.textContent = 'Oturumun adını yaz.';
-        return;
-      }
-      const planned = Number(data.get('minutes'));
-      const started = Date.now();
-      setFocusTimer({ id: newId(), started, ends: started + planned * 60000, title, course: canonicalCourse(data.get('course')),
-        day: activeDay(), planned, studyId: plannerRecord?.id });
-      location.hash = 'odak';
-      break;
-    }
   }
   plannerDialog.close();
-  if (plannerMode !== 'focus') save('Değişiklik kaydedildi.');
+  save('Değişiklik kaydedildi.');
   render();
 });
 
-setInterval(updateFocusClock, 1000);
 
 document.addEventListener('submit', event => {
   if (event.target.id !== 'planning-settings') return;

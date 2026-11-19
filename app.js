@@ -4,7 +4,7 @@ let scenarioCourse;
 const scenarioEstimates = new Map();
 
 function scenarioCourses() {
-  const titles = new Map(courseCatalog.map(([title]) => [courseKey(title), title]));
+  const titles = new Map(enrolledCourseNames().map((title) => [courseKey(title), title]));
   for (const entry of state.assessments) titles.set(courseKey(entry.course), canonicalCourse(entry.course));
   return titles;
 }
@@ -120,8 +120,7 @@ function dailyControls() {
   const workouts = eventsForDay(day).filter(event => event.kind === 'workout');
   const studies = eventsForDay(day).filter(event => event.kind === 'study');
   const lessons = eventsForDay(day).filter(event => event.kind === 'lesson');
-  const log = fitnessData.logs?.[day] ?? {};
-  const steps = fitnessStepTarget(fitnessData.profile?.baseline, 1);
+  const activities = (Array.isArray(fitnessData.activities) ? fitnessData.activities : []).filter(entry => entry?.day === day && Number.isFinite(entry.minutes) && Number.isFinite(entry.kcal));
   const checks = state.dailyChecks[day] ?? {};
   const check = (key, label, checked, extra = '') => `<label class="daily-control">
     <input type="checkbox" data-daily-check="${key}" ${checked ? 'checked' : ''} ${extra}><span>${escapeText(label)}</span></label>`;
@@ -130,9 +129,8 @@ function dailyControls() {
     <div class="daily-control-grid">
       <div>${lessons.length ? lessons.map(lesson => `<label class="daily-control"><input type="checkbox" data-event="${escapeText(lesson.id)}" ${lesson.attending ? 'checked' : ''}><span>${escapeText(lesson.title)} · Katılacağım</span></label>`).join('') : '<a class="text-link" href="#program">Ders programını gir</a>'}</div>
       <div>${studies.length ? studies.map(study => `<label class="daily-control"><input type="checkbox" data-daily-study="${escapeText(study.id)}" ${study.studyDone ? 'checked' : ''}><span>${escapeText(study.title)}</span></label>`).join('') : '<a class="text-link" href="#calisma">Çalışma oturumu planla</a>'}</div>
-      <div>${workouts.length ? workouts.map(workout => `<label class="daily-control"><input type="checkbox" data-workout="${escapeText(workout.id)}" ${workout.done ? 'checked' : ''}><span>${escapeText(workout.title)}</span></label>`).join('') : '<a class="text-link" href="#spor">Antrenman planla</a>'}</div>
+      <div>${workouts.map(workout => `<label class="daily-control"><input type="checkbox" data-workout="${escapeText(workout.id)}" ${workout.done ? 'checked' : ''}><span>${escapeText(workout.title)}</span></label>`).join('')}<a class="text-link" href="#spor">${activities.length ? `${activities.length} hareket · ${durationText(activities.reduce((sum, entry) => sum + entry.minutes, 0))}` : 'Hareket kaydet'}</a></div>
       <div>
-        ${check('steps', steps ? `Adım hedefi ${steps} · Kaydedilen ${log.steps ?? '—'}` : 'Günlük yürüyüş', checks.steps)}
         ${check('sleep', `Uyku hedefi ${state.sleep.duration} saat`, checks.sleep)}
       </div>
     </div>
@@ -143,7 +141,7 @@ document.addEventListener('change', event => {
   const { dailyCheck, dailyStudy } = event.target.dataset;
   if (!dailyCheck && !dailyStudy) return;
   if (dailyStudy) {
-    const study = state.events.find(entry => entry.id === dailyStudy && entry.day === selectedDay && entry.kind === 'study');
+    const study = state.events.find(entry => entry.id === dailyStudy && entry.kind === 'study');
     if (!study) return;
     study.studyDone = event.target.checked;
   } else {
@@ -159,6 +157,9 @@ document.addEventListener('change', event => {
 // Source: backups.js
 const automaticBackupsKey = 'everything-app-backups-v1';
 const backupAuxiliaryKeys = [
+  'everything-app-language-v1',
+  'everything-app-journals-v1',
+  'everything-app-projects-v1',
   'everything-app-books-v1',
   'everything-app-curiosity-v1',
   'everything-app-fitness-v1', 'everything-app-relationship-v1',
@@ -231,21 +232,19 @@ document.addEventListener('click', event => {
   }
   if (action !== 'restore' || !validPlannerData(backup.data)) return;
   if (!window.confirm('Plan bu yedeğe geri alınsın mı? Mevcut planın da önce yedeklenecek.')) return;
-  if (!createAutomaticBackup(true, 'Geri alma öncesi')) {
-    document.querySelector('#backup-feedback').textContent = 'Mevcut plan yedeklenemedi. Önce JSON yedeğini indir.';
-    return;
-  }
   try {
-    restoreBackupExtras(backup.extra);
-    replacePlannerData(backup.data);
-    save('Yedek geri alındı.');
+    restoreLocalBackup(backup.data, backup.extra);
     location.reload();
   } catch {
     document.querySelector('#backup-feedback').textContent = 'Yedek geri alınamadı. Tarayıcı depolama alanını kontrol et.';
   }
 });
 
-function restoreBackupExtras(extra) {
+function validateBackupExtras(extra) {
+  if (extra !== undefined && (!extra || typeof extra !== 'object' || Array.isArray(extra))) throw new Error('Ek kayıtlar okunamadı.');
+  for (const key of backupAuxiliaryKeys) {
+    if (extra?.[key] != null && typeof extra[key] !== 'string') throw new Error('Ek kayıt biçimi geçersiz.');
+  }
   const entries = backupAuxiliaryKeys.filter(key => typeof extra?.[key] === 'string');
   const parsed = new Map(entries.map(key => [key, JSON.parse(extra[key])]));
   const fitness = parsed.get('everything-app-fitness-v1');
@@ -258,13 +257,32 @@ function restoreBackupExtras(extra) {
       typeof entry.day !== 'string' || (entry.day && !/^\d{4}-\d\d-\d\d$/.test(entry.day))))) throw new Error('Kişisel yedek geçersiz.');
   if (saved && (!Array.isArray(saved) || saved.some(item => typeof item !== 'string'))) throw new Error('Kaydedilenler yedeği geçersiz.');
   if (sleep && (!Array.isArray(sleep.habits) || typeof sleep.day !== 'string')) throw new Error('Uyku yedeği geçersiz.');
-  for (const key of backupAuxiliaryKeys) {
-    const value = extra?.[key];
-    if (value === null) localStorage.removeItem(key);
-    else if (typeof value === 'string') {
-      localStorage.setItem(key, value);
+}
+
+function restoreLocalBackup(data, extra, synchronize = true) {
+  validateBackupExtras(extra);
+  const original = {...state};
+  const writes = [];
+  try {
+    replacePlannerData(data);
+    const updates = [[storageKey, JSON.stringify(state)], ...backupAuxiliaryKeys
+      .filter(key => extra && Object.hasOwn(extra, key)).map(key => [key, extra[key]])];
+    for (const [key,value] of updates) {
+      const previous = localStorage.getItem(key);
+      if (value === previous) continue;
+      if (value === null) localStorage.removeItem(key);
+      else localStorage.setItem(key,value);
+      writes.push([key,previous]);
     }
+  } catch (error) {
+    Object.assign(state,original);
+    for (const [key,value] of writes.reverse()) {
+      if (value === null) localStorage.removeItem(key);
+      else localStorage.setItem(key,value);
+    }
+    throw error;
   }
+  if (synchronize) noteSyncChange();
 }
 
 setInterval(() => { createAutomaticBackup(); }, 60000);
@@ -338,7 +356,7 @@ function materialReview() {
     ${panelHeading('Çıkarılan bilgileri kontrol et', 'Başlık ve tarih önerilerini düzenle. Yalnızca işaretlediklerin kaydedilir.')}
     <form id="material-review-form" class="sync-content form-fields">
       <strong class="row-title">${escapeText(preview.name)} · ${escapeText(preview.course)}</strong>
-      ${field('Dersin konularına eklenecek başlıklar', `<textarea name="topics" rows="5" maxlength="2500">${escapeText(preview.topics.join('\n'))}</textarea>`)}
+      ${field('Dersin konularına eklenecek başlıklar', `<textarea name="topics" rows="5" maxlength="15000">${escapeText(preview.topics.join('\n'))}</textarea>`)}
       <p class="row-meta">Konu listesi mevcut konulara eklenir. Sınav kapsamını takvim kaydında ayrıca seçebilirsin.</p>
       ${preview.dates.length ? preview.dates.map((date, index) => `<fieldset class="material-date">
         <legend><label><input type="checkbox" name="include-${index}"> Bu tarihi takvime ekle</label></legend>
@@ -456,8 +474,8 @@ document.addEventListener('submit', async event => {
   }
   const course = materialPreview.course;
   const key = courseKey(course);
-  const merged = [...new Set([...topicsForCourse(course), ...topicLines(data.get('topics'))])];
-  if (merged.join('\n').length > 2500) {
+  const merged = groupCourseTopics(course, [...topicsForCourse(course), ...topicLines(data.get('topics'))]);
+  if (merged.join('\n').length > 15000) {
     document.querySelector('#material-review-status').textContent = 'Toplam konu listesi çok uzun. Eklenecek başlıkları kısalt.';
     return;
   }
@@ -487,27 +505,13 @@ document.addEventListener('click', event => {
 
 // Source: curiosity.js
 const curiosityKey = 'everything-app-curiosity-v1';
-const curiositySeeds = [
-  ['Matematik', 'Sonsuzlukların büyüklükleri neden farklı?', 'Cantor teoremi'],
-  ['Bilgisayar', 'Bir bilgisayar rastgele sayı üretebilir mi?', 'Rastgele sayı üreteci'],
-  ['Tarih', 'Antik İskenderiye Kütüphanesi nasıl bir yerdi?', 'İskenderiye Kütüphanesi'],
-  ['Sanat', 'Bir resimde perspektif nasıl kurulur?', 'Perspektif'],
-  ['Doğa', 'Mantarlar bitkilerle nasıl ilişki kurar?', 'Mikoriza'],
-  ['Uzay', 'Bir yıldızın uzaklığı nasıl ölçülür?', 'Paralaks'],
-  ['Müzik', 'Aynı nota farklı çalgılarda neden farklı duyulur?', 'Tını'],
-  ['Dil', 'Diller birbirinden nasıl kelime alır?', 'Ödünçleme'],
-  ['Felsefe', 'Bir düşünce deneyi bize ne öğretebilir?', 'Düşünce deneyi'],
-  ['Mühendislik', 'Asma köprüler yükü nasıl taşır?', 'Asma köprü'],
-  ['Matematik', 'Bir yüzeyin tek tarafı olabilir mi?', 'Möbius şeridi'],
-  ['Bilgisayar', 'Bir algoritmanın çözemeyeceği sorular var mı?', 'Durma problemi'],
-  ['Kültür', 'Takvimler neden birbirinden farklı?', 'Takvim'],
-  ['Okyanus', 'Okyanusun dibinde güneşsiz yaşam nasıl olur?', 'Hidrotermal baca'],
-];
 let curiosityTab = 'daily';
 let curiosityMessage = '';
 let curiosityLinks = [];
 let curiosityLoading = false;
 let curiosityRequest = 0;
+let discoveryBusy = false;
+let discoveryRetry = 0;
 
 function readCuriosity() {
   try {
@@ -536,15 +540,13 @@ function curiosityDay() {
 }
 
 function curiosityPick() {
-  if (curiosityData.daily?.day === curiosityDay()) return curiosityData.daily;
+  if (curiosityData.daily) return curiosityData.daily;
   const pending = curiosityData.questions.filter(q => !q.done);
   if (pending.length) {
     const question = pending[0];
     return { day: curiosityDay(), title: question.title, topic: question.topic || question.title, category: 'Merak kuyruğundan', questionId: question.id };
   }
-  const dayNumber = Math.floor(Date.parse(curiosityDay()) / 86400000);
-  const [category, title, topic] = curiositySeeds[dayNumber % curiositySeeds.length];
-  return { day: curiosityDay(), title, topic, category };
+  return { day: curiosityDay(), title:'Bugünün konusu hazırlanıyor', topic:'', category:'Wikipedia keşfi' };
 }
 
 function wikiSearch(topic) {
@@ -557,13 +559,13 @@ function wikiArticle(title, language = 'tr') {
 
 function curiosityDaily() {
   const pick = curiosityPick();
-  if (curiosityData.daily?.day !== pick.day) keepCuriosity({...curiosityData, daily:pick});
   return `<p class="row-meta">${escapeText(pick.category)} · ${escapeText(pick.day)}</p>
     <h3>${escapeText(pick.title)}</h3>
+    ${pick.extract ? `<p class="books-prose">${escapeText(pick.extract)}</p><p class="row-meta">Wikipedia · CC BY-SA · <a href="${wikiArticle(pick.topic,pick.language)}" target="_blank" rel="noopener noreferrer">Makale ve yazar geçmişi</a></p>`:''}
+    ${discoveryBusy ? '<p class="row-meta">Yeni bir makale aranıyor…</p>' : ''}
     <p class="row-meta">Okurken bir yeni bilgi, bir bağlantı ve aklına gelen bir soru not al.</p>
-    <div class="sync-actions"><a class="button secondary" href="${wikiSearch(pick.topic)}" target="_blank" rel="noopener noreferrer">Wikipedia’da araştır</a>
-    <button class="button primary" data-curiosity="start-daily">Okuma rotası başlat</button>
-    <button class="button secondary" data-curiosity="shuffle">Başka konu seç</button>
+    <div class="sync-actions">${pick.topic ? `<a class="button secondary" href="${pick.article?wikiArticle(pick.topic,pick.language):wikiSearch(pick.topic)}" target="_blank" rel="noopener noreferrer">Wikipedia’da araştır</a><button class="button primary" data-curiosity="start-daily">Okuma rotası başlat</button>`:''}
+    <button class="button secondary" data-curiosity="shuffle" ${discoveryBusy?'disabled':''}>${curiosityData.daily?'Başka konu seç':'Yeniden dene'}</button>
     ${pick.questionId ? `<button class="button secondary" data-curiosity="complete-daily">Araştırdım</button>` : ''}</div>`;
 }
 
@@ -610,6 +612,46 @@ function refreshCuriosity() {
   const panel = document.querySelector('#curiosity-panel');
   if (panel) panel.outerHTML = curiosityPanel();
 }
+
+async function refreshDailyDiscovery(force = false) {
+  if (!document.querySelector('#curiosity-panel') || discoveryBusy) return;
+  if (!force && ((curiosityData.daily?.article && curiosityData.daily.day===curiosityDay()) || Date.now()<discoveryRetry)) return;
+  discoveryBusy=true;
+  curiosityMessage='';
+  refreshCuriosity();
+  try {
+    const seen=new Set(curiosityData.seen ?? []);
+    if(curiosityData.daily?.topic) seen.add('tr:'+curiosityData.daily.topic);
+    const categories=['Matematik','Bilgisayar bilimi','Matematik','Bilgisayar bilimi','Tarih','Sanat','Doğa','Kültür'];
+    const category=categories[seen.size%categories.length];
+    let selected;
+    for(let attempt=0;attempt<3 && !selected;attempt++) {
+      const parameters={action:'query',format:'json',origin:'*',prop:'extracts|pageprops',exintro:'1',explaintext:'1',exchars:'700',exlimit:'20',ppprop:'disambiguation'};
+      if(attempt===0) Object.assign(parameters,{generator:'search',gsrsearch:'incategory:"'+category+'"',gsrnamespace:'0',gsrlimit:'15',gsroffset:String((seen.size%100)*10)});
+      else Object.assign(parameters,{generator:'random',grnnamespace:'0',grnlimit:'15'});
+      const query=new URLSearchParams(parameters);
+      const response=await fetch('https://tr.wikipedia.org/w/api.php?'+query,{signal:AbortSignal.timeout(10000)});
+      if(!response.ok) throw new Error('Wikipedia unavailable');
+      const data=await response.json();
+      if(data.error) throw new Error('Wikipedia query failed');
+      const latest=readCuriosity();
+      for(const key of latest.seen ?? []) seen.add(key);
+      const candidates=Object.values(data.query?.pages ?? {}).filter(page=>page.pageid>0 && page.title && !seen.has('tr:'+page.title) && page.extract?.length>100 && !Object.hasOwn(page.pageprops ?? {},'disambiguation'));
+      selected=candidates[Math.floor(Math.random()*candidates.length)];
+    }
+    if(!selected) throw new Error('No unseen article');
+    seen.add('tr:'+selected.title);
+    const daily={day:curiosityDay(),title:selected.title,topic:selected.title,category:'Wikipedia · Yeni keşif',language:'tr',article:true,extract:selected.extract};
+    if(keepCuriosity({...curiosityData,seen:[...seen],daily})) curiosityMessage='Günlük keşfin güncellendi. Gösterilen makaleler tekrar seçilmez.';
+    discoveryRetry=Date.now()+60000;
+  } catch {
+    curiosityMessage=curiosityData.daily?'Yeni makale alınamadı. Son keşfin burada duruyor. Yeniden deneyebilirsin.':'Wikipedia’ya ulaşılamadı. Bağlantını kontrol edip yeniden dene.';
+    discoveryRetry=Date.now()+60000;
+  } finally {discoveryBusy=false;refreshCuriosity();}
+}
+
+window.addEventListener('focus',()=>{void refreshDailyDiscovery();});
+setInterval(()=>{void refreshDailyDiscovery();},60000);
 
 function startCuriosityRoute(title, language = 'tr') {
   const route = { id: crypto.randomUUID(), title, language, steps: [{title, read: false, note: ''}] };
@@ -677,11 +719,10 @@ document.addEventListener('click', event => {
   const id = button.dataset.id;
   const pick = curiosityPick();
   if (action === 'shuffle') {
-    const choices = curiositySeeds.filter(seed => seed[1] !== pick.title);
-    const [category, title, topic] = choices[Math.floor(Math.random() * choices.length)];
-    keepCuriosity({...curiosityData, daily:{day:curiosityDay(), category, title, topic}});
+    void refreshDailyDiscovery(true);
+    return;
   }
-  if (action === 'start-daily') startCuriosityRoute(pick.topic);
+  if (action === 'start-daily' && pick.topic) startCuriosityRoute(pick.topic,pick.language ?? 'tr');
   if (action === 'question-route') {
     const q = curiosityData.questions.find(q => q.id === id);
     if (q) startCuriosityRoute(q.topic || q.title);
@@ -783,11 +824,11 @@ function bookDetails(book) {
     <details class="books-section"><summary>Okuma geçmişi · ${sessions.length} oturum · ${sessions.reduce((sum,s) => sum+s.minutes,0)} dakika</summary>
     ${sessions.length ? `<ul class="books-log">${[...sessions].reverse().map(s => `<li>${escapeText(s.day)} · ${s.from}–${s.page}. sayfa · ${s.minutes} dk</li>`).join('')}</ul>` : empty('Henüz okuma oturumu yok.')}</details></div></section>
     <section class="panel page-panel">${panelHeading('Alıntılar ve notlar')}
-    <div class="books-body"><form id="book-note-form" class="sync-form">
+    <div class="books-body"><details class="book-note-entry"><summary>Alıntı veya not ekle</summary><form id="book-note-form" class="sync-form">
     ${field('Tür', '<select name="kind"><option value="note">Kişisel not</option><option value="quote">Alıntı</option></select>')}
     ${bookInput('Sayfa (isteğe bağlı)', 'page', '', `type="number" min="1" max="${book.total || 100000}" step="1"`)}
     ${field('Metin', '<textarea name="text" rows="3" maxlength="5000" required></textarea>')}
-    <button class="button primary" type="submit">Ekle</button></form>
+    <button class="button primary" type="submit">Ekle</button></form></details>
     <div class="books-notes">${notes.map(n => `<article><small class="row-meta">${n.kind === 'quote' ? 'Alıntı' : 'Not'}${n.page ? ' · Sayfa ' + n.page : ''}</small><p class="books-prose">${escapeText(n.text)}</p>
     <div class="sync-actions"><button class="button secondary" data-books="note-question" data-id="${escapeText(n.id)}">Merak kuyruğuna gönder</button><button class="button secondary" data-books="delete-note" data-id="${escapeText(n.id)}">Sil</button></div></article>`).join('') || empty('Hatırlamak istediğin bir cümleyi veya düşünceni ekle.')}</div></div></section>
     <section class="panel page-panel">${panelHeading('Bu kitap sana neyi merak ettirdi?')}
@@ -891,6 +932,833 @@ document.addEventListener('click', event => {
 });
 
 
+// Source: projects.js
+const projectsKey = 'everything-app-projects-v1';
+const projectStages = { idea: 'Fikir', active: 'Devam ediyor', paused: 'Beklemede', finished: 'Tamamlandı' };
+let projectSelection = null;
+let projectEditing = false;
+let projectFeedback = '';
+
+function readProjects() {
+  try {
+    const data = JSON.parse(localStorage.getItem(projectsKey));
+    return Array.isArray(data) ? data.filter(p => p && typeof p.id === 'string' && typeof p.title === 'string' && Object.hasOwn(projectStages,p.stage) && Array.isArray(p.steps)) : [];
+  } catch { return []; }
+}
+let projectRecords = readProjects();
+
+function storeProjects(records, message = 'Kaydedildi.') {
+  try {
+    localStorage.setItem(projectsKey,JSON.stringify(records));
+    projectRecords = records;
+    projectFeedback = message;
+    return true;
+  } catch {
+    projectFeedback = 'Kaydedilemedi. Tarayıcı depolama alanını kontrol edip tekrar dene.';
+    document.querySelector('#projects-feedback').textContent = projectFeedback;
+    return false;
+  }
+}
+
+function projectTaskId(project, step) { return `p-${project.id}-${step.id}`; }
+function projectTask(project, step) { return state.tasks.find(t => t.id === projectTaskId(project,step)); }
+function projectStepDone(project, step) { return projectTask(project,step)?.done ?? step.done; }
+
+function projectForm(project) {
+  return `<section class="panel page-panel">${panelHeading(project ? 'Projeyi düzenle' : 'Yeni proje')}
+    <form id="project-editor-form" class="projects-body sync-form">
+    ${field('Proje adı', `<input name="title" value="${escapeText(project?.title ?? '')}" required maxlength="160">`)}
+    ${field('Amaç', `<textarea name="purpose" rows="3" maxlength="3000" placeholder="Bu projeyle ne yapmak istiyorsun?">${escapeText(project?.purpose ?? '')}</textarea>`)}
+    ${field('Aşama', `<select name="stage">${Object.entries(projectStages).map(([key,label]) => `<option value="${key}" ${key === project?.stage ? 'selected' : ''}>${label}</option>`).join('')}</select>`)}
+    ${field('Bağlantılar (her satıra bir adres)', `<textarea name="links" rows="3" maxlength="4000" placeholder="https://github.com/...">${escapeText((project?.links ?? []).join('\n'))}</textarea>`)}
+    <div class="sync-actions"><button class="button primary" type="submit">Kaydet</button><button class="button secondary" type="button" data-project="cancel">Vazgeç</button></div></form></section>`;
+}
+
+function projectDetail(project) {
+  const next = project.steps.find(s => s.id === project.nextStep && !projectStepDone(project,s)) ?? project.steps.find(s => !projectStepDone(project,s));
+  return `<div class="sync-actions books-toolbar"><button class="button secondary" data-project="back">Panoya dön</button><button class="button secondary" data-project="edit">Düzenle</button><button class="button secondary" data-project="delete">Projeyi sil</button></div>
+    <section class="panel page-panel">${panelHeading(escapeText(project.title),projectStages[project.stage])}
+    <div class="projects-body"><p class="books-prose">${escapeText(project.purpose || 'Henüz amaç eklenmedi.')}</p>
+    <div class="project-links">${(project.links ?? []).map(link => `<a href="${escapeText(link)}" target="_blank" rel="noopener noreferrer">${escapeText(link)}</a>`).join('')}</div>
+    ${next ? `<div class="project-next"><small class="row-meta">Bir sonraki adım</small><h3>${escapeText(next.title)}</h3>
+    <form id="project-task-form" class="sync-form" data-step="${escapeText(next.id)}">
+    ${field('Görev tarihi', `<input name="day" type="date" required value="${projectTask(project,next)?.day ?? selectedDay}">`)}
+    ${projectTask(project,next) ? `<p class="row-meta">Günlük görevlere eklendi · ${escapeText(projectTask(project,next).day)}</p><a class="button secondary" href="#bugun">Günlük görevleri aç</a>` : '<button class="button primary" type="submit">Günlük görevlerime ekle</button>'}</form></div>` : empty('Bir sonraki somut adımını aşağıdan ekle.')}
+    <form id="project-step-form" class="sync-form books-section">${field('Küçük adım', '<input name="title" required maxlength="180" placeholder="Örneğin, karakterin hareketini yaz">')}<button class="button secondary" type="submit">Adım ekle</button></form>
+    <ul class="project-steps">${project.steps.map(step => `<li><label class="daily-control"><input type="checkbox" data-project-step="${escapeText(step.id)}" ${projectStepDone(project,step) ? 'checked' : ''}><span>${escapeText(step.title)}</span></label><div class="sync-actions">
+    ${!projectStepDone(project,step) ? `<button class="button secondary" data-project="next" data-id="${escapeText(step.id)}" aria-pressed="${next?.id === step.id}">Sıradaki adım</button>` : ''}
+    <button class="button secondary" data-project="remove-step" data-id="${escapeText(step.id)}">Sil</button></div></li>`).join('')}</ul>
+    <p class="row-meta">Günlük görevlerde tamamladığın adımlar burada da tamamlanır. Projeyi veya adımı silersen aktarılmış günlük görevini Görevler bölümünden yönetebilirsin.</p></div></section>`;
+}
+
+function projectsPage() {
+  const project = projectRecords.find(p => p.id === projectSelection);
+  return `${intro('Hobi projeleri','Fikirlerini somut adımlara dönüştür.')}
+    <p id="projects-feedback" class="row-meta" role="status">${escapeText(projectFeedback)}</p>
+    ${projectEditing ? projectForm(project) : project ? projectDetail(project) : `<button class="button primary books-toolbar" data-project="add">Proje ekle</button>
+    <div class="project-board">${Object.entries(projectStages).map(([stage,label]) => `<section class="project-column"><h2>${label} <small>${projectRecords.filter(p => p.stage === stage).length}</small></h2>
+    ${projectRecords.filter(p => p.stage === stage).map(p => {const done = p.steps.filter(s => projectStepDone(p,s)).length; return `<article class="panel project-card"><h3>${escapeText(p.title)}</h3><p class="books-prose row-meta">${escapeText(p.purpose || 'Amaç eklenmedi.')}</p><small class="row-meta">${done} / ${p.steps.length} adım tamamlandı</small><button class="button secondary" data-project="open" data-id="${escapeText(p.id)}">Projeyi aç</button></article>`;}).join('') || empty('Bu aşamada proje yok.')}</section>`).join('')}</div><p class="row-meta">Proje kayıtları bu tarayıcıda saklanır ve otomatik yedeklere eklenir.</p>`}`;
+}
+
+function persistProjectTask(tasks) {
+  try {
+    createAutomaticBackup();
+    localStorage.setItem(storageKey,JSON.stringify({...state,tasks}));
+  } catch {
+    projectFeedback = 'Görev kaydedilemedi. Tekrar dene.';
+    document.querySelector('#projects-feedback').textContent = projectFeedback;
+    return false;
+  }
+  state.tasks = tasks;
+  noteSyncChange();
+  return true;
+}
+
+document.addEventListener('submit',event => {
+  const form = event.target;
+  if (!['project-editor-form','project-step-form','project-task-form'].includes(form.id)) return;
+  event.preventDefault();
+  const values = new FormData(form);
+  const project = projectRecords.find(p => p.id === projectSelection);
+  if (form.id === 'project-task-form') {
+    const step = project?.steps.find(s => s.id === form.dataset.step);
+    if (!step || projectTask(project,step)) return;
+    const task = {id:projectTaskId(project,step),day:values.get('day'),title:`${project.title} · ${step.title}`,priority:'Normal',done:false};
+    if (persistProjectTask([...state.tasks,task])) { projectFeedback = 'Günlük görevlerine eklendi.'; render(); }
+    return;
+  }
+  const title = values.get('title').trim();
+  if (!title) { form.elements.title.value = ''; form.reportValidity(); return; }
+  if (form.id === 'project-editor-form') {
+    const links = values.get('links').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    try { for (const link of links) if (!['https:','http:'].includes(new URL(link).protocol)) throw new Error(); }
+    catch { form.elements.links.setCustomValidity('Her satıra http:// veya https:// ile başlayan geçerli bir adres yaz.'); form.elements.links.reportValidity(); return; }
+    const record = {...project,id:project?.id ?? crypto.randomUUID(),title,purpose:values.get('purpose').trim(),stage:values.get('stage'),links,steps:project?.steps ?? []};
+    const records = project ? projectRecords.map(p=>p.id === project.id ? record : p) : [...projectRecords,record];
+    if (storeProjects(records)) { projectSelection = record.id; projectEditing = false; render(); }
+  } else if (project) {
+    const step = {id:crypto.randomUUID(),title,done:false};
+    if (storeProjects(projectRecords.map(p=>p.id === project.id ? {...p,steps:[...p.steps,step]} : p))) render();
+  }
+});
+
+document.addEventListener('input',event=> {
+  if (event.target.name === 'links' && event.target.closest('#project-editor-form')) event.target.setCustomValidity('');
+});
+
+document.addEventListener('change',event=> {
+  const id = event.target.dataset.projectStep;
+  if (!id) return;
+  const project = projectRecords.find(p=>p.id === projectSelection);
+  const step = project?.steps.find(s=>s.id === id);
+  if (!step) return;
+  const done = event.target.checked;
+  const task = projectTask(project,step);
+  if (task) persistProjectTask(state.tasks.map(t=>t.id === task.id ? {...t,done} : t));
+  else storeProjects(projectRecords.map(p=>p.id === project.id ? {...p,steps:p.steps.map(s=>s.id === id ? {...s,done} : s)} : p));
+  render();
+});
+
+document.addEventListener('click',event=> {
+  const button = event.target.closest('[data-project]');
+  if (!button) return;
+  const action = button.dataset.project;
+  const project = projectRecords.find(p=>p.id === projectSelection);
+  projectFeedback = '';
+  if (action === 'add') { projectSelection = null; projectEditing = true; }
+  if (action === 'open') { projectSelection = button.dataset.id; projectEditing = false; }
+  if (action === 'edit') projectEditing = true;
+  if (action === 'cancel') projectEditing = false;
+  if (action === 'back') { projectSelection = null; projectEditing = false; }
+  if (project && action === 'next') storeProjects(projectRecords.map(p=>p.id === project.id ? {...p,nextStep:button.dataset.id} : p));
+  if (project && action === 'remove-step' && confirm('Bu adım silinsin mi?')) storeProjects(projectRecords.map(p=>p.id === project.id ? {...p,steps:p.steps.filter(s=>s.id !== button.dataset.id)} : p));
+  if (project && action === 'delete' && confirm('Bu proje silinsin mi?')) {
+    if (storeProjects(projectRecords.filter(p=>p.id !== project.id))) projectSelection = null;
+  }
+  render();
+});
+
+
+// Source: journals.js
+const journalsKey = 'everything-app-journals-v1';
+const journalKinds = { payments:'Ödemeler', games:'Oyun günlüğü', memories:'Anı haritası', music:'Müzik keşif günlüğü', experiences:'Deneyim listesi', challenges:'Fotoğraf temaları', language:'Dil pratiği' };
+const experienceStages = { planned:'Yapmak istiyorum', active:'Hazırlanıyorum', done:'Tamamladım' };
+const photoThemes = ['Işık ve gölge', 'Günlük bir ayrıntı', 'Yansımalar', 'Kampüste hayat', 'Tek bir renk', 'Hareket', 'Simetri', 'Eski ve yeni', 'Doğadaki desenler', 'Gece', 'Bir hikâye anlat', 'Sade bir kare'];
+const paymentPeriods = { once:'Tek sefer', monthly:'Aylık', yearly:'Yıllık' };
+const gameStages = { planned:'Oynayacağım', playing:'Oynuyorum', paused:'Ara verdim', finished:'Bitirdim' };
+let journalKind = 'payments';
+let journalEditId = null;
+let journalEditing = false;
+let journalMessage = '';
+let journalMapId = null;
+let journalQuery = '';
+let journalBusy = false;
+let journalStandalone = false;
+
+function readJournals() {
+  try {
+    const records = JSON.parse(localStorage.getItem(journalsKey));
+    return Array.isArray(records) ? records.filter(r=>r && typeof r.id === 'string' && typeof r.title === 'string' && Object.hasOwn(journalKinds,r.kind)) : [];
+  } catch { return []; }
+}
+let journalRecords = readJournals();
+
+function saveJournals(records, message = 'Kaydedildi.') {
+  try {
+    localStorage.setItem(journalsKey,JSON.stringify(records));
+    journalRecords = records;
+    journalMessage = message;
+    return true;
+  } catch {
+    journalMessage = 'Kaydedilemedi. Tarayıcı depolama alanı dolmuş olabilir. Fotoğrafı küçültüp tekrar deneyebilirsin.';
+    const feedback = document.querySelector('#journal-feedback');
+    if (feedback) feedback.textContent = journalMessage;
+    return false;
+  }
+}
+
+function journalInput(label,name,value='',attributes='') {
+  return field(label,`<input name="${name}" value="${escapeText(value ?? '')}" ${attributes}>`);
+}
+function journalSelect(label,name,options,value) {
+  return field(label,`<select name="${name}">${Object.entries(options).map(([key,text])=>`<option value="${escapeText(key)}" ${key===value ? 'selected' : ''}>${escapeText(text)}</option>`).join('')}</select>`);
+}
+function journalNotes(value='') {
+  return field('Notların',`<textarea name="notes" rows="3" maxlength="4000">${escapeText(value)}</textarea>`);
+}
+
+function journalEditor(record) {
+  const titleLabels={music:'Şarkı adı',games:'Oyun adı',payments:'Ödeme veya abonelik adı',memories:'Anının başlığı',experiences:'Denemek istediğin deneyim',challenges:'Fotoğraf teması'};
+  let fields = journalInput(titleLabels[journalKind],'title',record?.title,'required maxlength="160"');
+  if (journalKind==='payments') fields += `<div class="time-fields">${journalInput('Tutar','amount',record?.amount,'type="number" required min="0.01" max="10000000" step="0.01"')}${journalSelect('Para birimi','currency',{TRY:'TL',USD:'USD',EUR:'EUR'},record?.currency ?? 'TRY')}</div>` +
+    journalSelect('Tekrar','period',paymentPeriods,record?.period ?? 'monthly') + journalInput('Sonraki ödeme tarihi','day',record?.day ?? curiosityDay(),'type="date" required') +
+    journalSelect('Durum','paymentStatus',{active:'Aktif',inactive:'Pasif'},record?.paymentStatus ?? 'active');
+  if (journalKind==='games') fields += journalInput('Platform','platform',record?.platform,'maxlength="100" placeholder="PC, PlayStation…"') + journalSelect('Durum','stage',gameStages,record?.stage ?? 'planned') +
+    `<div class="time-fields">${journalInput('İlerleme (%)','progress',record?.progress ?? 0,'type="number" required min="0" max="100" step="1"')}${journalInput('Toplam oynama süresi (saat)','hours',record?.hours ?? 0,'type="number" required min="0" max="100000" step="0.1"')}</div>` +
+    journalSelect('Puanın','rating',{'':'Puanlamadım',1:'1 / 5',2:'2 / 5',3:'3 / 5',4:'4 / 5',5:'5 / 5'},String(record?.rating ?? ''));
+  if (journalKind==='memories') fields += journalInput('Tarih','day',record?.day ?? curiosityDay(),'type="date" required') + journalInput('Yer','place',record?.place,'maxlength="180" placeholder="Şehir, kampüs veya bir mekân"') +
+    `<details class="books-section"><summary>Haritada işaretle (isteğe bağlı)</summary><p class="row-meta">Konumun enlem ve boylamını gir. Örneğin bir mekânın koordinatlarını haritadan kopyalayabilirsin.</p><div class="time-fields">${journalInput('Enlem','latitude',record?.latitude,'type="number" min="-85" max="85" step="any"')}${journalInput('Boylam','longitude',record?.longitude,'type="number" min="-180" max="180" step="any"')}</div></details>` +
+    field('Fotoğraf (isteğe bağlı, en fazla 800 KB)','<input name="photo" type="file" accept="image/jpeg,image/png,image/webp">') +
+    (record?.photo ? '<label class="daily-control"><input type="checkbox" name="removePhoto">Mevcut fotoğrafı kaldır</label>' : '');
+  if (journalKind==='music') fields += journalInput('Sanatçı','artist',record?.artist,'required maxlength="160"') + journalInput('Keşif tarihi','day',record?.day ?? curiosityDay(),'type="date" required') +
+    journalInput('O sırada nasıl hissediyordun?','mood',record?.mood,'maxlength="120" placeholder="Sakin, heyecanlı, yolculukta…"') + journalInput('Nerede keşfettin?','source',record?.source,'maxlength="180" placeholder="Bir arkadaş, film, çalma listesi…"') +
+    journalInput('Dinleme bağlantısı','url',record?.url,'type="url" maxlength="1500" placeholder="https://open.spotify.com/track/…"');
+  if (journalKind==='experiences') fields += journalInput('Hedef yıl','year',record?.year ?? Number(curiosityDay().slice(0,4)),'type="number" min="1900" max="2200" required') +
+    journalSelect('Durum','stage',experienceStages,record?.stage ?? 'planned') + journalInput('Yer','place',record?.place,'maxlength="180"') +
+    journalInput('Tamamlanma tarihi (tamamladığında gerekli)','day',record?.day,'type="date"');
+  if (journalKind==='challenges') fields += journalInput('Başlangıç','day',record?.day ?? curiosityDay(),'type="date" required') + journalInput('Son gün','endDay',record?.endDay ?? shiftDay(curiosityDay(),6),'type="date" required');
+  return `<section class="panel page-panel">${panelHeading(record ? 'Kaydı düzenle' : 'Yeni kayıt')}<form id="journal-editor-form" class="journal-body sync-form">${fields}${journalNotes(record?.notes)}
+    <div class="sync-actions"><button class="button primary" type="submit">Kaydet</button><button class="button secondary" type="button" data-journal="cancel">Vazgeç</button></div></form></section>`;
+}
+
+function journalMoney(amount,currency) { return new Intl.NumberFormat('tr-TR',{style:'currency',currency}).format(amount); }
+
+function journalDate(day) {
+  return new Intl.DateTimeFormat('tr-TR',{dateStyle:'medium',timeZone:'UTC'}).format(new Date(day+'T12:00:00Z'));
+}
+
+function paymentNextDate(record) {
+  const date = new Date(record.day+'T12:00:00Z');
+  const anchor = record.anchorDay ?? date.getUTCDate();
+  const month = date.getUTCMonth()+(record.period==='yearly' ? 12 : 1);
+  const last = new Date(Date.UTC(date.getUTCFullYear(),month+1,0,12)).getUTCDate();
+  return new Date(Date.UTC(date.getUTCFullYear(),month,Math.min(anchor,last),12)).toISOString().slice(0,10);
+}
+
+function paymentSummary(records) {
+  const active = records.filter(r=>r.paymentStatus==='active');
+  const totals = ['TRY','USD','EUR'].map(currency=> {
+    const total = active.filter(r=>r.currency===currency && r.period!=='once').reduce((sum,r)=>sum+r.amount/(r.period==='yearly'?12:1),0);
+    return total ? journalMoney(total,currency) : '';
+  }).filter(Boolean);
+  const soon = active.filter(r=>r.day<=shiftDay(curiosityDay(),7)).length;
+  return `<div class="panel journal-summary"><strong>Aylık abonelik karşılığı · ${totals.join(' + ') || 'Henüz abonelik yok'}</strong><p class="row-meta">Yıllık ücretler 12 aya bölünür. ${soon} ödeme gecikmiş veya önümüzdeki 7 gün içinde.</p></div>`;
+}
+
+function journalMap(record) {
+  if (record.latitude==null || record.longitude==null) return record.place ? `<a href="https://www.openstreetmap.org/search?query=${encodeURIComponent(record.place)}" target="_blank" rel="noopener noreferrer">Yeri haritada ara</a>` : '';
+  const lat=record.latitude,lon=record.longitude;
+  const bbox=[Math.max(-180,lon-.02),Math.max(-85,lat-.02),Math.min(180,lon+.02),Math.min(85,lat+.02)].join(',');
+  return `<button class="button secondary" data-journal="map" data-id="${escapeText(record.id)}">${journalMapId===record.id ? 'Haritayı kapat' : 'Haritada göster'}</button>
+    ${journalMapId===record.id ? `<iframe class="journal-map" title="${escapeText(record.title)} konumu" loading="lazy" referrerpolicy="no-referrer" src="https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${lat}%2C${lon}"></iframe>` : ''}`;
+}
+
+function journalCard(record) {
+  let detail='';
+  if (record.kind==='payments') detail=`<strong>${journalMoney(record.amount,record.currency)}</strong><p class="row-meta">${paymentPeriods[record.period]} · ${record.paymentStatus==='active' ? 'Aktif' : 'Pasif'}</p><p class="${record.paymentStatus==='active' && record.day<curiosityDay() ? 'journal-overdue' : 'row-meta'}">${record.paymentStatus==='inactive' ? 'Son ödeme tarihi' : 'Sonraki ödeme'} · ${journalDate(record.day)}</p>
+    ${record.paymentStatus==='active' ? `<button class="button secondary" data-journal="paid" data-id="${escapeText(record.id)}">Ödendi olarak işaretle</button>` : ''}
+    ${(record.payments ?? []).length ? `<details><summary>Ödeme geçmişi (${record.payments.length})</summary><ul class="books-log">${[...record.payments].reverse().map(p=>`<li>${journalDate(p.due)} · ${journalMoney(p.amount,p.currency)} · ${journalDate(p.paid)} tarihinde işlendi</li>`).join('')}</ul></details>` : ''}`;
+  if (record.kind==='games') detail=`<p class="row-meta">${gameStages[record.stage]}${record.platform ? ' · '+escapeText(record.platform) : ''}</p><p>%${record.progress} · ${record.hours} saat${record.rating ? ' · '+record.rating+' / 5' : ''}</p><progress value="${record.progress}" max="100" aria-label="Oyun ilerlemesi"></progress>`;
+  if (record.kind==='memories') detail=`<p class="row-meta">${journalDate(record.day)}${record.place ? ' · '+escapeText(record.place) : ''}</p>${/^data:image\/(jpeg|png|webp);base64,/.test(record.photo ?? '') ? `<img class="journal-photo" src="${escapeText(record.photo)}" alt="${escapeText(record.title)}" loading="lazy">` : ''}${journalMap(record)}`;
+  if (record.kind==='music') detail=`<p>${escapeText(record.artist)}</p><p class="row-meta">${journalDate(record.day)}${record.mood ? ' · '+escapeText(record.mood) : ''}</p>${record.source ? `<p class="row-meta">${escapeText(record.source)}</p>` : ''}${record.url && /^https?:\/\//i.test(record.url) ? `<a class="button secondary" href="${escapeText(record.url)}" target="_blank" rel="noopener noreferrer">Dinle</a>` : ''}`;
+  if (record.kind==='experiences') detail=`<p class="row-meta">${record.year} · ${experienceStages[record.stage]}${record.place ? ' · '+escapeText(record.place):''}</p>${record.day ? `<p class="row-meta">${journalDate(record.day)}</p>`:''}${record.stage==='done' ? `<button class="button secondary" data-journal="memory" data-id="${escapeText(record.id)}">${journalRecords.some(r=>r.originExperience===record.id)?'Anı haritasına aktarıldı':'Anı haritasına aktar'}</button>`:''}`;
+  if (record.kind==='challenges') detail=`<p class="row-meta">${journalDate(record.day)} – ${journalDate(record.endDay)}</p><p class="row-meta">${(record.photos??[]).length} fotoğraf</p>
+    <div class="photo-series">${(record.photos??[]).map(photo=>`<figure><img class="journal-photo" src="${escapeText(photo.image)}" alt="${escapeText(photo.caption||record.title)}" loading="lazy"><figcaption>${escapeText(photo.caption)}</figcaption><button class="button secondary" data-journal="delete-photo" data-id="${escapeText(record.id)}" data-photo="${escapeText(photo.id)}">Fotoğrafı sil</button></figure>`).join('')}</div>
+    <details><summary>Seriye fotoğraf ekle</summary><form class="sync-form books-section" data-photo-series="${escapeText(record.id)}">${field('Fotoğraf (JPEG, PNG, WebP · en fazla 800 KB)','<input name="photo" type="file" accept="image/jpeg,image/png,image/webp" required>')}${journalInput('Fotoğrafın hikâyesi','caption','','maxlength="500"')}<button type="submit" class="button primary">Fotoğrafı ekle</button></form></details>`;
+  return `<article class="panel journal-card"><h2>${escapeText(record.title)}</h2>${detail}${record.notes ? `<p class="books-prose">${escapeText(record.notes)}</p>` : ''}<div class="sync-actions books-section"><button class="button secondary" data-journal="edit" data-id="${escapeText(record.id)}">Düzenle</button><button class="button secondary" data-journal="delete" data-id="${escapeText(record.id)}">Sil</button></div></article>`;
+}
+
+function journalsPage() {
+  const records=journalRecords.filter(r=>r.kind===journalKind).sort((a,b)=>journalKind==='payments' ? a.day.localeCompare(b.day) : (b.day ?? '').localeCompare(a.day ?? ''));
+  const filtered=records.filter(r=>[r.title,r.artist,r.place,r.platform,r.mood,r.notes,r.year].filter(Boolean).join(' ').toLocaleLowerCase('tr').includes(journalQuery.toLocaleLowerCase('tr')));
+  const record=records.find(r=>r.id===journalEditId);
+  return `${intro(journalStandalone ? journalKinds[journalKind] : 'Kişisel günlükler','')}
+    ${journalStandalone ? '' : `<div class="sync-actions books-toolbar" role="group" aria-label="Günlük türü">${Object.entries(journalKinds).map(([key,label])=>`<button class="button ${key===journalKind?'primary':'secondary'}" data-journal="tab" data-kind="${key}" aria-pressed="${key===journalKind}">${label}</button>`).join('')}</div>`}
+    <p id="journal-feedback" class="row-meta" role="status">${escapeText(journalMessage)}</p>
+    ${journalKind==='language' ? languagePractice() : journalEditing ? journalEditor(record) : `${journalKind==='payments'?paymentSummary(records):''}<div class="books-toolbar"><h2 class="journal-heading">${journalKinds[journalKind]}</h2><div class="sync-actions">${journalKind==='challenges'?'<button class="button secondary" data-journal="weekly-theme">Bu haftanın temasını ekle</button>':''}<button class="button primary" data-journal="add">Kayıt ekle</button></div></div>
+    <form id="journal-search-form" class="books-search">${journalInput('Kayıtlarda ara','query',journalQuery,'type="search" maxlength="200"')}<button class="button secondary">Ara</button></form>
+    <div class="journal-grid">${filtered.map(journalCard).join('')}</div>${filtered.length?'':empty('Henüz eşleşen kayıt yok. İlk kaydını ekleyebilirsin.')}<p class="row-meta">Kayıtlar bu tarayıcıda saklanır ve otomatik yedeklere eklenir. Haritalar ve dinleme bağlantıları internet gerektirir.</p>`}`;
+}
+
+async function journalPhoto(file) {
+  if (!['image/jpeg','image/png','image/webp'].includes(file.type) || file.size>800*1024) throw new Error('Fotoğraf JPEG, PNG veya WebP biçiminde ve en fazla 800 KB olmalı.');
+  return new Promise((resolve,reject)=>{ const reader=new FileReader(); reader.onload=()=>resolve(reader.result); reader.onerror=()=>reject(new Error('Fotoğraf okunamadı.')); reader.readAsDataURL(file); });
+}
+
+document.addEventListener('submit',async event=> {
+  const form=event.target;
+  if (form.dataset.photoSeries) {
+    event.preventDefault();
+    if (journalBusy) return;
+    journalBusy=true;
+    const submit=form.querySelector('[type="submit"]'); submit.disabled=true;
+    try {
+      const values=new FormData(form);
+      const image=await journalPhoto(values.get('photo'));
+      const photo={id:crypto.randomUUID(),image,caption:values.get('caption').trim()};
+      if (saveJournals(journalRecords.map(r=>r.id===form.dataset.photoSeries?{...r,photos:[...(r.photos??[]),photo]}:r))) render();
+    } catch(error) {document.querySelector('#journal-feedback').textContent=error.message;}
+    finally {journalBusy=false;submit.disabled=false;}
+    return;
+  }
+  if (!['journal-editor-form','journal-search-form'].includes(form.id)) return;
+  event.preventDefault();
+  if (journalBusy) return;
+  const values=new FormData(form);
+  if (form.id==='journal-search-form') { journalQuery=values.get('query').trim(); render(); return; }
+  const title=values.get('title').trim();
+  if (!title) {form.elements.title.value='';form.reportValidity();return;}
+  const old=journalRecords.find(r=>r.id===journalEditId);
+  const kind=journalKind;
+  const record={...old,id:old?.id ?? crypto.randomUUID(),kind,title,notes:values.get('notes').trim()};
+  journalBusy=true;
+  const submit=form.querySelector('[type="submit"]'); submit.disabled=true;
+  try {
+    if (kind==='payments') Object.assign(record,{amount:Number(values.get('amount')),currency:values.get('currency'),period:values.get('period'),day:values.get('day'),paymentStatus:values.get('paymentStatus'),anchorDay:old?.day===values.get('day') ? old.anchorDay : Number(values.get('day').slice(-2)),payments:old?.payments ?? []});
+    if (kind==='games') Object.assign(record,{platform:values.get('platform').trim(),stage:values.get('stage'),progress:values.get('stage')==='finished'?100:Number(values.get('progress')),hours:Number(values.get('hours')),rating:values.get('rating')?Number(values.get('rating')):null});
+    if (kind==='experiences') {
+      if(values.get('stage')==='done' && !values.get('day')) throw new Error('Tamamladığın deneyimin tarihini gir.');
+      Object.assign(record,{year:Number(values.get('year')),stage:values.get('stage'),place:values.get('place').trim(),day:values.get('day')});
+    }
+    if (kind==='challenges') {
+      if(values.get('endDay')<values.get('day')) throw new Error('Son gün başlangıç tarihinden önce olamaz.');
+      Object.assign(record,{day:values.get('day'),endDay:values.get('endDay'),photos:old?.photos??[]});
+    }
+    if (kind==='music') {
+      const artist=values.get('artist').trim(),url=values.get('url').trim();
+      if (!artist) throw new Error('Sanatçı adını gir.');
+      if (url && !['http:','https:'].includes(new URL(url).protocol)) throw new Error('Dinleme bağlantısı http:// veya https:// ile başlamalı.');
+      Object.assign(record,{artist,url,day:values.get('day'),mood:values.get('mood').trim(),source:values.get('source').trim()});
+    }
+    if (kind==='memories') {
+      const latitude=values.get('latitude'),longitude=values.get('longitude');
+      if (!!latitude!==!!longitude) throw new Error('Harita için enlem ve boylamı birlikte gir.');
+      let photo=values.has('removePhoto')?'':old?.photo ?? '';
+      const file=values.get('photo'); if (file?.size) photo=await journalPhoto(file);
+      Object.assign(record,{photo,day:values.get('day'),place:values.get('place').trim(),latitude:latitude===''?null:Number(latitude),longitude:longitude===''?null:Number(longitude)});
+    }
+    const records=old?journalRecords.map(r=>r.id===old.id?record:r):[...journalRecords,record];
+    if (saveJournals(records)) {journalEditing=false;journalEditId=null;render();}
+  } catch(error) {
+    journalMessage=error.message; const feedback=document.querySelector('#journal-feedback'); if (feedback) feedback.textContent=journalMessage;
+  } finally {journalBusy=false;submit.disabled=false;}
+});
+
+document.addEventListener('click',event=> {
+  const button=event.target.closest('[data-journal]');
+  if (!button || journalBusy) return;
+  const action=button.dataset.journal;
+  const record=journalRecords.find(r=>r.id===button.dataset.id);
+  journalMessage='';
+  if (action==='tab') {journalKind=button.dataset.kind;journalQuery='';journalEditing=false;journalEditId=null;}
+  if (action==='add') {journalEditId=null;journalEditing=true;}
+  if (action==='cancel') {journalEditId=null;journalEditing=false;}
+  if (record && action==='edit') {journalEditId=record.id;journalEditing=true;}
+  if (record && action==='delete' && confirm('Bu kayıt silinsin mi?')) saveJournals(journalRecords.filter(r=>r.id!==record.id),'Kayıt silindi.');
+  if (record && action==='map') journalMapId=journalMapId===record.id?null:record.id;
+  if (record && action==='delete-photo' && confirm('Fotoğraf silinsin mi?')) saveJournals(journalRecords.map(r=>r.id===record.id?{...r,photos:r.photos.filter(p=>p.id!==button.dataset.photo)}:r));
+  if (record?.kind==='experiences' && action==='memory' && record.stage==='done') {
+    if (!journalRecords.some(r=>r.originExperience===record.id)) saveJournals([...journalRecords,{id:crypto.randomUUID(),kind:'memories',originExperience:record.id,title:record.title,day:record.day,place:record.place,notes:record.notes,photo:'',latitude:null,longitude:null}],'Anı haritasına aktarıldı. Anılar sekmesinden fotoğraf ve konum ekleyebilirsin.');
+    else journalMessage='Bu deneyim zaten Anı haritasında.';
+  }
+  if (action==='weekly-theme') {
+    const now=curiosityDay();
+    const monday=shiftDay(now,-((new Date(now+'T12:00:00Z').getUTCDay()+6)%7));
+    if (!journalRecords.some(r=>r.kind==='challenges' && r.week===monday)) {
+      const index=Math.floor(Date.parse(monday)/604800000)%photoThemes.length;
+      saveJournals([...journalRecords,{id:crypto.randomUUID(),kind:'challenges',title:photoThemes[index],week:monday,day:monday,endDay:shiftDay(monday,6),notes:'',photos:[]}],'Haftanın teması eklendi. Kendi temalarını da oluşturabilirsin.');
+    } else journalMessage='Bu haftanın teması zaten listende.';
+  }
+  if (record?.kind==='payments' && action==='paid' && record.paymentStatus==='active' && confirm(`${journalDate(record.day)} tarihli ödeme ödendi olarak kaydedilsin mi?`)) {
+    const payment={due:record.day,paid:curiosityDay(),amount:record.amount,currency:record.currency};
+    const next={...record,payments:[...(record.payments ?? []),payment],anchorDay:record.anchorDay ?? Number(record.day.slice(-2))};
+    if (record.period==='once') next.paymentStatus='inactive'; else next.day=paymentNextDate(record);
+    saveJournals(journalRecords.map(r=>r.id===record.id?next:r),'Ödeme kaydedildi.');
+  }
+  render();
+});
+
+
+// Source: language.js
+const languageKey='everything-app-language-v1';
+let languageFilter='';
+let languageQuiz=null;
+let languageRevealed=false;
+let languageAnswerMessage='';
+let languageEdit=null;
+function readLanguageCards() {
+  try { const cards=JSON.parse(localStorage.getItem(languageKey)); return Array.isArray(cards)?cards.filter(c=>c && typeof c.id==='string' && typeof c.word==='string' && typeof c.meaning==='string' && typeof c.language==='string'):[]; }
+  catch {return [];}
+}
+let languageCards=readLanguageCards();
+
+function saveLanguageCards(cards,message='Kelime kaydedildi.') {
+  try {localStorage.setItem(languageKey,JSON.stringify(cards));languageCards=cards;journalMessage=message;return true;}
+  catch {journalMessage='Kelime kaydedilemedi. Tarayıcı depolama alanını kontrol et.';document.querySelector('#journal-feedback').textContent=journalMessage;return false;}
+}
+
+function languagePractice() {
+  const languages=[...new Set(languageCards.map(c=>c.language))].sort();
+  const cards=languageCards.filter(c=>!languageFilter || c.language===languageFilter);
+  const due=cards.filter(c=>!c.due || c.due<=curiosityDay());
+  const current=languageCards.find(c=>c.id===languageQuiz);
+  const editing=languageCards.find(c=>c.id===languageEdit);
+  return `<section class="panel page-panel">${panelHeading('Dil pratiği','Kelimelerini kendi örnek cümlelerinle öğren.')}
+    <div class="journal-body">${journalSelect('Çalışacağın dil','practiceLanguage',Object.fromEntries([['','Tüm diller'],...languages.map(l=>[l,l])]),languageFilter).replace('<select name="practiceLanguage"','<select id="practice-language" name="practiceLanguage"')}
+    <p class="row-meta">${cards.length} kelime · ${due.length} tekrar bekliyor</p>
+    <button class="button primary" data-language="quiz" ${due.length?'':'disabled'}>Tekrar sınavını başlat</button>
+    ${current?`<div class="language-quiz"><small class="row-meta">${escapeText(current.language)}</small><h3>${escapeText(current.word)}</h3>
+    <form id="language-answer-form" class="sync-form">${journalInput('Türkçe karşılığını yaz','answer','','maxlength="300" autocomplete="off"')}<button class="button secondary" type="submit">Kontrol et</button></form>
+    <button class="button secondary" data-language="reveal">Cevabı göster</button>
+    ${languageRevealed?`<p class="books-prose"><strong>${escapeText(current.meaning)}</strong></p>${current.sentence?`<p class="books-prose">${escapeText(current.sentence)}</p>`:''}<p class="row-meta">${escapeText(languageAnswerMessage)}</p><div class="sync-actions"><button class="button secondary" data-language="again">Tekrar çalışmalıyım</button><button class="button primary" data-language="known">Hatırladım</button></div>`:''}
+    <button class="button secondary books-section" data-language="stop">Sınavı kapat</button></div>`:''}
+    <details class="books-section" ${editing?'open':''}><summary>${editing?'Kelimeyi düzenle':'Kelime ekle'}</summary>
+    <form id="language-card-form" class="sync-form books-section">
+    ${journalInput('Dil','language',editing?.language??languageFilter,'required maxlength="60" placeholder="İngilizce"')}
+    ${journalInput('Kelime veya ifade','word',editing?.word,'required maxlength="160"')}
+    ${journalInput('Türkçe karşılığı','meaning',editing?.meaning,'required maxlength="300"')}
+    ${field('Örnek cümle',`<textarea name="sentence" rows="2" maxlength="1500">${escapeText(editing?.sentence??'')}</textarea>`)}
+    <div class="sync-actions"><button class="button primary" type="submit">${editing?'Değişiklikleri kaydet':'Kelime ekle'}</button>${editing?'<button type="button" class="button secondary" data-language="cancel-edit">Vazgeç</button>':''}</div></form></details>
+    <div class="language-cards">${cards.map(c=>`<article><div><strong>${escapeText(c.word)}</strong><small class="row-meta">${escapeText(c.language)} · Sonraki tekrar ${escapeText(c.due??curiosityDay())}</small></div><p>${escapeText(c.meaning)}</p>${c.sentence?`<p class="books-prose row-meta">${escapeText(c.sentence)}</p>`:''}<div class="sync-actions"><button class="button secondary" data-language="edit" data-id="${escapeText(c.id)}">Düzenle</button><button class="button secondary" data-language="delete" data-id="${escapeText(c.id)}">Sil</button></div></article>`).join('')||empty('İlk kelimeni ekleyerek başla.')}</div></div></section>`;
+}
+
+function nextLanguageQuestion() {
+  const due=languageCards.filter(c=>(!languageFilter||c.language===languageFilter)&&(!c.due||c.due<=curiosityDay()));
+  languageQuiz=due.length?due[Math.floor(Math.random()*due.length)].id:null;
+  languageRevealed=false;languageAnswerMessage='';
+  if (!due.length) journalMessage='Bugünkü tekrarlarını tamamladın.';
+}
+
+document.addEventListener('change',event=> {
+  if(event.target.id!=='practice-language') return;
+  languageFilter=event.target.value;languageQuiz=null;languageEdit=null;render();
+});
+
+document.addEventListener('submit',event=> {
+  const form=event.target;
+  if(!['language-card-form','language-answer-form'].includes(form.id)) return;
+  event.preventDefault();const values=new FormData(form);
+  if(form.id==='language-answer-form') {
+    const card=languageCards.find(c=>c.id===languageQuiz);if(!card)return;
+    const normalize=s=>s.trim().toLocaleLowerCase('tr').replace(/[.!?]+$/,'');
+    languageAnswerMessage=normalize(values.get('answer'))===normalize(card.meaning)?'Cevabın kayıtlı karşılıkla eşleşti.':'Kayıtlı karşılığı incele. Eş anlamlı bir cevap verdiysen kendin değerlendirebilirsin.';
+    languageRevealed=true;render();return;
+  }
+  const language=values.get('language').trim(),word=values.get('word').trim(),meaning=values.get('meaning').trim();
+  for(const key of ['language','word','meaning']) if(!values.get(key).trim()){form.elements[key].value='';form.reportValidity();return;}
+  const old=languageCards.find(c=>c.id===languageEdit);
+  const record={id:old?.id??crypto.randomUUID(),language,word,meaning,sentence:values.get('sentence').trim(),level:0,due:curiosityDay()};
+  const cards=old?languageCards.map(c=>c.id===old.id?record:c):[...languageCards,record];
+  if(saveLanguageCards(cards)){languageEdit=null;languageQuiz=null;languageFilter=language;render();}
+});
+
+document.addEventListener('click',event=> {
+  const button=event.target.closest('[data-language]');if(!button)return;
+  const action=button.dataset.language;
+  if(action==='quiz')nextLanguageQuestion();
+  if(action==='stop')languageQuiz=null;
+  if(action==='reveal')languageRevealed=true;
+  if(action==='edit')languageEdit=button.dataset.id;
+  if(action==='cancel-edit')languageEdit=null;
+  if(action==='delete'&&confirm('Bu kelime silinsin mi?')) {
+    if(saveLanguageCards(languageCards.filter(c=>c.id!==button.dataset.id),'Kelime silindi.')){if(languageQuiz===button.dataset.id)languageQuiz=null;if(languageEdit===button.dataset.id)languageEdit=null;}
+  }
+  if((action==='known'||action==='again')&&languageRevealed) {
+    const card=languageCards.find(c=>c.id===languageQuiz);if(!card)return;
+    const level=action==='known'?Math.min(5,(card.level??0)+1):0;
+    const interval=[1,1,3,7,14,30][level];
+    if(saveLanguageCards(languageCards.map(c=>c.id===card.id?{...c,level,due:shiftDay(curiosityDay(),interval)}:c),'Tekrar kaydedildi.'))nextLanguageQuestion();
+  }
+  render();
+});
+
+
+// Source: spaces.js
+const appSpaces = {
+  akademi: {
+    title:'Akademi', icon:'book', description:'Derslerin, notların ve çalışma planın.',
+    tools:[
+      ['tekrar','Aralıklı tekrar','sync','Zorlandığın konuları daha sık hatırla'],
+      ['dersler','Final konuları','book','Ders içerikleri ve konu takibi'],
+      ['notlar','Notlar','chart','Sınav puanları ve geçme hedefleri'],
+      ['program','Ders programı','calendar','Haftalık ders saatleri'],
+      ['calisma','Çalışma programı','sparkle','Önceliklerine göre çalışma planı'],
+      ['takvim','Sınav ve teslimler','calendar','Yaklaşan sınavlar ve son tarihler'],
+      ['dokumanlar','Dokümanlar','file','Ders materyalleri ve dosyalar'],
+      ['hafta','Haftalık özet','chart','Çalışma kayıtların ve ilerlemen'],
+    ],
+  },
+  saglik: {
+    title:'Sağlık', icon:'dumbbell', description:'Uyku, hareket ve antrenman düzenin.',
+    tools:[['spor','Spor','dumbbell','Hareket önerileri ve günlük kalori tahmini'],['uyku','Uyku','moon','Uyku saatleri ve dinlenme alışkanlıkları']],
+  },
+  kesif: {
+    title:'Keşif', icon:'compass', description:'Oku, araştır ve yeni şeyler öğren.',
+    tools:[['kesfet','Haberler','file','İlgi alanlarından günlük haberler'],['merak','Merak ve keşif','compass','Günün keşfi, sorular ve okuma rotaları'],['kitaplar','Kitap günlüğü','book','Okuma rafların, alıntılar ve notlar'],['dil','Dil pratiği','file','Kelime defteri ve tekrar sınavları']],
+  },
+  atolye: {
+    title:'Atölye', icon:'layers', description:'Üretmek, oynamak ve denemek için alanın.',
+    tools:[['projeler','Hobi projeleri','layers','Fikirlerden tamamlanan projelere'],['fotograf','Fotoğraf temaları','sparkle','Haftalık meydan okumalar ve fotoğraf serileri'],['oyunlar','Oyun günlüğü','check','Oyunların, ilerlemen ve değerlendirmelerin']],
+  },
+  kisisel: {
+    title:'Kişisel', icon:'heart', description:'Anıların, deneyimlerin ve gündelik kayıtların.',
+    tools:[['degerlendirme','Gün sonu','check','Günü değerlendir ve yarını düzenle'],['anilar','Anı haritası','compass','Fotoğraf, yer ve tarihle hatırladıkların'],['deneyimler','Deneyim listesi','check','Bu yıl yapmak ve görmek istediklerin'],['muzik','Müzik keşif günlüğü','heart','Yeni şarkılar ve sana hatırlattıkları'],['odemeler','Ödemeler','calendar','Abonelikler ve ödeme tarihleri'],['iliski','Birlikte planlar','heart','Birlikte planların ve özel tarihler']],
+  },
+};
+
+const journalSpaceRoutes = { dil:'language', fotograf:'challenges', oyunlar:'games', anilar:'memories', deneyimler:'experiences', muzik:'music', odemeler:'payments' };
+
+function journalSpacePage(kind) {
+  if (journalKind !== kind) {
+    journalKind=kind;
+    journalEditing=false;
+    journalEditId=null;
+    journalQuery='';
+    journalMessage='';
+  }
+  journalStandalone=true;
+  return journalsPage();
+}
+
+function spaceViews() {
+  return {
+    merak:()=>intro('Merak ve keşif','Sorularına ve yeni konulara zaman ayır.')+curiosityPanel(),
+    ...Object.fromEntries(Object.keys(appSpaces).map(key=>[key,()=>spaceHome(key)])),
+    ...Object.fromEntries(Object.entries(journalSpaceRoutes).map(([route,kind])=>[route,()=>journalSpacePage(kind)])),
+    gunlukler:()=>spaceHome('kisisel'),
+  };
+}
+
+function spaceForPage(page) {
+  if(page==='gunlukler')return 'kisisel';
+  return Object.keys(appSpaces).find(key=>key===page || appSpaces[key].tools.some(tool=>tool[0]===page));
+}
+
+function spacePageLabel(page) {
+  const key=spaceForPage(page);
+  if(!key)return null;
+  const space=appSpaces[key];
+  return space.tools.find(tool=>tool[0]===page)?.[1] ?? space.title;
+}
+
+function hubSpaces() {
+  return `<section class="hub-spaces" aria-labelledby="hub-spaces-title"><h2 id="hub-spaces-title">Alanların</h2>
+    <div class="hub-space-grid">${Object.entries(appSpaces).map(([key,space])=>`<a class="hub-space-card" href="#${key}" data-space-card="${key}">
+    ${icon(space.icon,'space-card-icon')}<div><strong>${space.title}</strong><small>${space.description}</small></div>${icon('arrow')}</a>`).join('')}</div></section>`;
+}
+
+function spaceHome(key) {
+  const space=appSpaces[key];
+  return `<div class="space-welcome">${icon(space.icon,'space-welcome-icon')}<div><h1>${space.title}</h1><p>${space.description}</p></div></div>
+    <div class="space-tools">${space.tools.map(([route,label,symbol,description])=>`<a href="#${route}" class="panel space-tool">
+    ${icon(symbol,'tile-icon')}<div><h2>${label}</h2><p>${description}</p></div>${icon('arrow')}</a>`).join('')}</div>`;
+}
+
+function renderSpaceNavigation(page) {
+  const key=spaceForPage(page);
+  const space=appSpaces[key];
+  document.body.dataset.space=key ?? 'hub';
+  const brand=document.querySelector('.brand');
+  brand.href=space ? '#'+key : '#bugun';
+  brand.innerHTML=icon(space?.icon ?? 'layers','brand-icon')+`<span>${space?.title ?? 'Everything App'}</span>`;
+  brand.setAttribute('aria-label',space ? space.title+' ana sayfa' : 'Everything App Bugün');
+  const nav=document.querySelector('#space-navigation');
+  const link=(route,label,symbol)=>`<a href="#${route}" data-page="${route}">${icon(symbol)}${label}</a>`;
+  if(space) {
+    nav.innerHTML=`<a class="hub-return" href="#bugun">${icon('chevron-left')}Bugün’e dön</a>
+    <details class="space-nav" ${window.matchMedia('(min-width: 811px)').matches?'open':''}><summary>${space.title} menüsü ${icon('chevron-right')}</summary>
+    <div class="nav-group">${link(key,'Genel bakış',space.icon)}${space.tools.map(([route,label,symbol])=>link(route,label,symbol)).join('')}</div></details>`;
+  } else {
+    nav.innerHTML=`<div class="nav-group">${link('bugun','Bugün','home')}${link('esitle','Eşitleme ve yedekler','sync')}</div>`;
+  }
+  const actions=document.querySelector('.topbar-actions');
+  actions.hidden=!!space && key!=='akademi';
+}
+
+window.matchMedia('(min-width: 811px)').addEventListener('change', event=> {
+  const menu=document.querySelector('.space-nav');
+  if(menu) menu.open=event.matches;
+});
+
+
+// Source: productivity.js
+let nextMinutes = 30;
+let reviewCourse = '';
+let searchQuery = '';
+let installPrompt = null;
+
+function productivityViews() {
+  return { tekrar: reviewPage, ara: searchPage, degerlendirme: reflectionPage, uygulama: installPage };
+}
+
+function reviewTopics() {
+  return enrolledCourseNames().flatMap((course) => topicsForCourse(course).map(topic => {
+    const record = state.topicReviews.find(row => row.course === course && row.topic === topic);
+    return { course, topic, record, due: record?.due ?? activeDay() };
+  }));
+}
+
+function nextReview(record, rating, day) {
+  const previous = record?.interval ?? 0;
+  const interval = rating === 'hard' ? 1 : rating === 'medium' ? Math.max(2, Math.ceil(previous * 1.5)) : Math.max(4, Math.ceil(previous * 2.5));
+  return { interval: Math.min(180, interval), due: shiftDay(day, Math.min(180, interval)), last: day };
+}
+
+function recommendation(minutes = nextMinutes) {
+  const day = activeDay();
+  const current = nowMinutes();
+  const busy = eventsForDay(day).filter(e => e.kind !== 'lesson' || e.attending).map(e => [clockMinutes(e.time), e.endTime ? clockMinutes(e.endTime) : clockMinutes(e.time) + (e.minutes || 60)]);
+  for (const e of state.assessments.filter(e => e.day === day && e.kind !== 'deadline')) busy.push([clockMinutes(e.time), (e.endTime ? clockMinutes(e.endTime) : clockMinutes(e.time) + 90)]);
+  const ongoing = busy.find(([start, end]) => start <= current && current < end);
+  if (ongoing) return { title: 'Şu an programında bir etkinlik var', reason: `${clockLabel(ongoing[1])} sonrasında yeniden öneri alabilirsin.`, route: 'program' };
+  const next = busy.filter(([start]) => start > current).sort((a,b) => a[0]-b[0])[0];
+  const available = Math.min(minutes, next ? next[0] - current - (state.planning.breakMinutes || 0) : minutes);
+  if (available < 5) return { title: 'Kısa bir mola ver', reason: 'Sıradaki etkinliğine hazırlanmak için zaman bırak.', route: 'program' };
+  const dueTask = state.tasks.filter(t => !t.done && t.day <= day).sort((a,b) => a.day.localeCompare(b.day) || (a.dueTime || '24:00').localeCompare(b.dueTime || '24:00'))[0];
+  if (dueTask) return { title: dueTask.title, reason: `${available} dakikalık bir adımla başla. ${dueTask.day < day ? 'Bu görev gecikmiş.' : 'Bugünkü görevlerinden biri.'}`, route: 'bugun', taskDay:dueTask.day };
+  const exams = upcomingExams();
+  const exam = exams.find(e => daysUntil(e.day)<=3 || topicsForCourse(e.course).some(t=>topicMastery(e.course,t)!=='known'));
+  const review = reviewTopics().filter(t => t.record && t.due <= day).sort((a,b) => a.due.localeCompare(b.due))[0];
+  if (review && (!exam || daysUntil(exam.day)>3)) return { title: review.topic, reason: `${review.course} · Tekrar zamanı geldi. ${Math.min(available,15)} dakika kendini sına.`, route: 'tekrar' };
+  if (exam) {
+    const topic = orderedTopics(exam.course, topicsForCourse(exam.course))[0];
+    return { title: topic || exam.title, reason: `${exam.course} · Sınava ${daysUntil(exam.day)} gün kaldı. ${available} dakika çalış ve birkaç soru çöz.`, route: 'dersler' };
+  }
+  const course = coursePriorities()[0];
+  return { title: course ? `${course.title} çalış` : 'Bir sonraki küçük adımını seç', reason: course ? `${available} dakika ayır. ${course.reason}` : 'Bir görev ekle veya projelerinden bir adım seç.', route: course ? 'calisma' : 'projeler' };
+}
+
+function nextActionCard() {
+  if (selectedDay !== activeDay()) return '';
+  const pick = recommendation();
+  return `<section class="panel productivity-panel">${panelHeading('Şimdi ne yapayım?','Programına ve yaklaşan işlerine göre tek adım')}
+    <div class="productivity-body"><form id="next-action-form" class="productivity-toolbar">${field('Boş vaktim',`<select name="minutes">${[10,15,25,30,45,60,90].map(n=>`<option value="${n}" ${n===nextMinutes?'selected':''}>${n} dakika</option>`).join('')}</select>`)}<button class="button primary">Öneri al</button></form>
+    <h3>${escapeText(pick.title)}</h3><p>${escapeText(pick.reason)}</p><a class="text-link" href="#${pick.route}" ${pick.taskDay ? `data-result-day="${escapeText(pick.taskDay)}"` : ''}>${pick.taskDay ? 'Görevin olduğu günü aç' : 'İlgili alanı aç'} →</a></div></section>`;
+}
+
+function reviewPage() {
+  const day = activeDay();
+  const topics = reviewTopics().filter(t => !reviewCourse || t.course === reviewCourse).sort((a,b) => a.due.localeCompare(b.due) || Number(Boolean(b.record))-Number(Boolean(a.record)));
+  const due = topics.filter(t => t.due <= day);
+  return `${intro('Aralıklı tekrar','Önce konuyu hatırlamaya çalış; ardından notlarından kontrol edip kendini değerlendir.')}
+    <section class="panel page-panel"><div class="productivity-body">${field('Ders',`<select id="review-course"><option value="">Bütün dersler</option>${enrolledCourseNames().map((c)=>`<option ${reviewCourse===c?'selected':''}>${escapeText(c)}</option>`).join('')}</select>`)}
+    <p>${due.filter(t=>t.record).length} planlı tekrar, ${due.filter(t=>!t.record).length} yeni konu. İlk değerlendirmeden sonra zor konular 1, orta konular 2, kolay konular en az 4 gün sonra gelir.</p>
+    ${due.length ? due.slice(0,10).map(t=>`<article class="review-card"><small>${escapeText(t.course)} · ${t.record ? 'Tekrar: '+escapeText(t.due) : 'İlk değerlendirme'}</small><h3>${escapeText(t.topic)}</h3><details><summary>Hatırlama görevi</summary><p>Tanımı kendi cümlelerinle yaz, bir örnek üret ve bir soruyu notlarına bakmadan çöz. Sonucu ders materyalinle kontrol et.</p></details><div class="productivity-toolbar">${[['hard','Zor'],['medium','Orta'],['easy','Kolay']].map(([r,label])=>`<button class="button secondary" data-review-rating="${r}" data-course="${escapeText(t.course)}" data-topic="${escapeText(t.topic)}">${label}</button>`).join('')}</div></article>`).join('') : empty('Bugünkü tekrarların tamamlandı.')}
+    <details><summary>Yaklaşan tekrarlar</summary>${topics.filter(t=>t.record && t.due>day).map(t=>`<p>${escapeText(t.due)} · ${escapeText(t.course)} · ${escapeText(t.topic)}</p>`).join('') || empty('Henüz planlanmış tekrar yok.')}</details></div></section>`;
+}
+
+function daysUntil(day) { return Math.max(0, Math.round((dateFor(day)-dateFor(activeDay()))/86400000)); }
+function upcomingExams() { return state.assessments.filter(e => e.kind === 'final' && e.grade == null && e.day >= activeDay() && (e.day !== activeDay() || !e.time || clockMinutes(e.time) >= nowMinutes())).sort((a,b)=>a.day.localeCompare(b.day) || a.time.localeCompare(b.time)); }
+
+function searchRecords() {
+  const rows = [];
+  const add = (type,title,detail,route,target={}) => rows.push({type,title:String(title || ''),detail:String(detail || ''),route,...target});
+  enrolledCourseNames().forEach((c)=>add('Ders',c,topicsForCourse(c).join(' '),'dersler'));
+  state.tasks.forEach(t=>add('Görev',t.title,`${t.day} ${t.course || ''} ${t.done?'Tamamlandı':''}`,'bugun',{day:t.day}));
+  state.documents.forEach(d=>add('Doküman',d.title || d.name,d.course || '','dokumanlar'));
+  state.assessments.forEach(e=>add('Sınav / teslim',e.title,`${e.course} ${e.day} ${e.topics.join(' ')}`,['midterm','quiz'].includes(e.kind)?'notlar':'takvim'));
+  projectRecords.forEach(p=>add('Proje',p.title,`${p.purpose} ${p.steps.map(s=>s.title).join(' ')}`,'projeler',{project:p.id}));
+  for(const book of bookRecords){
+    add('Kitap',book.title,[book.author,book.review].filter(Boolean).join(' · '),'kitaplar',{book:book.id});
+    for(const note of book.notes ?? [])add('Kitap notu',book.title,note.text,'kitaplar',{book:book.id});
+  }
+  for(const journal of journalRecords){
+    const route=Object.keys(journalSpaceRoutes).find(key=>journalSpaceRoutes[key]===journal.kind);
+    if(route)add(journalKinds[journal.kind],journal.title,[journal.notes,journal.place,journal.artist,journal.platform,journal.day].filter(Boolean).join(' · '),route);
+  }
+  for(const question of curiosityData.questions)add('Merak sorusu',question.title,question.topic,'merak',{tab:'queue'});
+  for(const route of curiosityData.routes)add('Okuma rotası',route.title,route.steps.map(step=>[step.title,step.note].filter(Boolean).join(' ')).join(' · '),'merak',{tab:'routes'});
+  return rows;
+}
+function searchResults(query) {
+  const terms=query.toLocaleLowerCase('tr-TR').trim().split(/\s+/).filter(Boolean);
+  return terms.length ? searchRecords().filter(r=>terms.every(t=>`${r.title} ${r.detail}`.toLocaleLowerCase('tr-TR').includes(t))) : [];
+}
+function searchPage() {
+  const results=searchResults(searchQuery);
+  return `${intro('Her yerde ara','Ders, görev, doküman, kitap, proje ve not kayıtlarında ara.')}<section class="panel page-panel"><div class="productivity-body"><form id="global-search-form" class="productivity-toolbar">${field('Arama',`<input name="query" type="search" value="${escapeText(searchQuery)}" required maxlength="150" placeholder="Konu, kitap veya görev adı…">`)}<button class="button primary">Ara</button></form><p role="status">${searchQuery ? `${results.length} sonuç` : 'Aramak istediğin kelimeyi yaz.'}</p>${results.map(r=>`<article class="review-card"><small>${r.type}</small><h3>${escapeText(r.title)}</h3><p>${escapeText(r.detail.slice(0,220))}</p><a class="text-link" href="#${r.route}" ${[['day',r.day],['project',r.project],['book',r.book],['tab',r.tab]].filter(([,v])=>v).map(([key,v])=>`data-result-${key}="${escapeText(v)}"`).join(' ')}>Aç →</a></article>`).join('')}</div></section>`;
+}
+
+function reflectionPage() {
+  const day=selectedDay;
+  const record=state.reflections[day] || {};
+  const tasks=state.tasks.filter(t=>t.day===day);
+  const done=tasks.filter(t=>t.done);
+  return `${intro('Gün sonu','Günü değerlendir ve yarının ilk adımını seç.',true)}<section class="panel page-panel"><div class="productivity-body"><p>${done.length}/${tasks.length} görev tamamlandı.</p>${done.map(t=>`<p>✓ ${escapeText(t.title)}</p>`).join('')}<form id="reflection-form">${field('Bugün ne iyi gitti?',`<textarea name="wins" maxlength="1000" rows="3">${escapeText(record.wins || '')}</textarea>`)}${field('Ne aksadı?',`<textarea name="obstacles" maxlength="1000" rows="3">${escapeText(record.obstacles || '')}</textarea>`)}${field('Yarının ilk adımı',`<input name="next" maxlength="180" value="${escapeText(record.next || '')}">`)}<p>Yarına taşımak istediğin tamamlanmamış görevleri seç:</p>${tasks.filter(t=>!t.done).map(t=>`<label class="daily-control"><input type="checkbox" name="carry" value="${escapeText(t.id)}"><span>${escapeText(t.title)}</span></label>`).join('') || '<p class="row-meta">Taşınacak görev yok.</p>'}<p class="row-meta">Seçilen görevlerin tarihi ${shiftDay(day,1)} olur. İlk adımın aynı güne görev olarak eklenir.</p><button class="button primary">Kaydet ve yarını düzenle</button></form>${record.saved ? '<p role="status">Değerlendirme kaydedildi.</p>' : ''}</div></section>`;
+}
+
+function installPage() {
+  const secure=window.isSecureContext;
+  return `${intro('Telefon ve çevrimdışı kullanım','Uygulamayı ana ekranına ekle; temel kayıtlarına çevrimdışı eriş.')}<section class="panel page-panel"><div class="productivity-body"><p role="status">${navigator.onLine?'Çevrimiçi':'Çevrimdışı'} · ${secure ? 'Güvenli bağlantı' : 'Kurulum ve çevrimdışı destek için HTTPS gerekir.'}</p><button class="button primary" data-productivity="install" ${installPrompt?'':'hidden'}>Uygulamayı yükle</button><p>Android: Tarayıcı menüsü → Uygulamayı yükle / Ana ekrana ekle.</p><p>iPhone: Safari → Paylaş → Ana Ekrana Ekle.</p><p>İlk çevrimiçi açılışta temel ekranlar indirilir. Kayıtlar bu cihazda tutulur; haberler, müzik ve eşitleme internet bağlantısı ister.</p><p class="row-meta">Telefonundan erişim için bilgisayarındaki sunucuya ulaşabileceğin bir adres gerekir. Yerel ağdaki HTTP adresleri kurulum ve çevrimdışı desteği sağlamayabilir; HTTPS üzerinden yayınlama gerekir.</p><p id="offline-status" role="status">${secure && 'serviceWorker' in navigator ? 'Çevrimdışı desteğin durumu kontrol ediliyor…' : 'Bu bağlantıda çevrimdışı destek etkin değil.'}</p></div></section>`;
+}
+
+document.addEventListener('submit',event=>{
+  const id=event.target.id;
+  if(!['next-action-form','global-search-form','reflection-form'].includes(id))return;
+  event.preventDefault();
+  const data=new FormData(event.target);
+  if(id==='next-action-form')nextMinutes=Math.min(90,Math.max(5,Number(data.get('minutes')) || 30));
+  if(id==='global-search-form')searchQuery=String(data.get('query')).slice(0,150);
+  if(id==='reflection-form'){
+    const day=selectedDay, next=String(data.get('next') || '').trim();
+    const previous=state.reflections[day];
+    state.reflections[day]={wins:String(data.get('wins')),obstacles:String(data.get('obstacles')),next,saved:true};
+    const carry=new Set(data.getAll('carry'));
+    const tomorrow=shiftDay(day,1);
+    for(const task of state.tasks.filter(t=>t.day===day && !t.done && carry.has(t.id))){
+      (task.postponements ??=[]).push({changedOn:activeDay(),from:day,to:tomorrow});
+      task.day=tomorrow;
+      delete task.plannedTime;
+      delete task.plannedEnd;
+    }
+    const id='reflection-'+day;
+    const linked=state.tasks.find(task=>task.id===id);
+    if(linked && !linked.done && linked.day===tomorrow){
+      if(next)linked.title=next;
+      else state.tasks.splice(state.tasks.indexOf(linked),1);
+    } else if(!linked && next && previous?.next!==next){
+      state.tasks.push({id,day:tomorrow,title:next,priority:'Normal',done:false});
+    }
+    save('Gün sonu kaydedildi; yarının görevleri düzenlendi.');
+  }
+  render();
+});
+document.addEventListener('change',event=>{
+  if(event.target.id==='review-course'){reviewCourse=event.target.value;render();}
+});
+document.addEventListener('click',async event=>{
+  const result=event.target.closest('[data-result-day],[data-result-project],[data-result-book],[data-result-tab]');
+  if(result){
+    const {resultDay,resultProject,resultBook,resultTab}=result.dataset;
+    if(resultDay)selectedDay=resultDay;
+    if(resultProject){projectSelection=resultProject;projectEditing=false;}
+    if(resultBook){selectedBookId=resultBook;bookEditing=false;}
+    if(resultTab)curiosityTab=resultTab;
+    if(location.hash===result.hash || (!location.hash && result.hash==='#bugun'))render();
+    return;
+  }
+  const button=event.target.closest('[data-review-rating], [data-productivity]');
+  if(!button)return;
+  if(button.dataset.reviewRating){
+    const {course,topic,reviewRating}=button.dataset;
+    if(!['hard','medium','easy'].includes(reviewRating) || !topicsForCourse(course).includes(topic))return;
+    let record=state.topicReviews.find(r=>r.course===course && r.topic===topic);
+    if(!record){record={course,topic};state.topicReviews.push(record);}
+    Object.assign(record,nextReview(record,reviewRating,activeDay()));
+    state.topicMastery[courseKey(course)] ??= {};
+    state.topicMastery[courseKey(course)][topic]=({hard:'unknown',medium:'partial',easy:'known'})[reviewRating];
+    save('Tekrar kaydedildi.');render();
+  }
+  if(button.dataset.productivity==='install' && installPrompt){await installPrompt.prompt();await installPrompt.userChoice;installPrompt=null;render();}
+});
+window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();installPrompt=event;if(location.hash==='#uygulama')render();});
+window.addEventListener('appinstalled',()=>{installPrompt=null;if(location.hash==='#uygulama')render();});
+async function updateOfflineStatus() {
+  const node=document.querySelector('#offline-status');
+  if(!node || !window.isSecureContext || !('serviceWorker' in navigator))return;
+  try {const reg=await navigator.serviceWorker.getRegistration();node.textContent=reg?.active?'Temel ekranlar çevrimdışı kullanıma hazır.':'Çevrimdışı ekranlar hazırlanıyor. Biraz sonra tekrar kontrol et.';}catch{node.textContent='Çevrimdışı destek kontrol edilemedi.';}
+}
+window.addEventListener('load',()=>{
+  if('serviceWorker' in navigator && window.isSecureContext)navigator.serviceWorker.register('/sw.js').then(()=>updateOfflineStatus()).catch(()=>{const node=document.querySelector('#offline-status');if(node)node.textContent='Çevrimdışı destek kurulamadı. Sunucuyu yeniden başlatıp sayfayı yenile.';});
+});
+
+
+// Source: finals.js
+function applyFinalSeason(data) { data.assessments ??= []; return data; }
+
+function finalPeriodBanner(showLink = true) {
+  const days = state.assessments.filter(entry => entry.kind === 'final').map(entry => entry.day).sort();
+  const date = day => dayFormat.format(dateFor(day));
+  const range = days.length ? date(days[0]) + (days[0] === days.at(-1) ? '' : ' – ' + date(days.at(-1))) : '';
+  return `<section class="final-period"><strong>Final dönemi</strong><span>${range ? 'Kayıtlı finaller · ' + range : 'Final kaydı yok.'}</span>${showLink ? '<a class="text-link" href="#takvim">Sınav takvimini aç →</a>' : ''}</section>`;
+}
+function activeAssessment(entry) {
+  return !['midterm','quiz'].includes(entry.kind);
+}
+
+function assessmentTopics(entry) {
+  return entry.kind === 'final' ? topicsForCourse(entry.course) : entry.topics;
+}
+
+function courseNavigation(prefix = 'course') {
+  return `<nav class="course-jump-nav" aria-label="Derslere hızlı geçiş"><label class="field"><span>Derse git</span><select data-course-jump="${prefix}"><option value="">Ders seç…</option>${enrolledCourseNames().map((title,index)=>`<option value="${index}">${escapeText(title)}</option>`).join('')}</select></label><button type="button" class="button secondary" data-course-collapse>Hepsini kapat</button></nav>`;
+}
+
+function courseTopicList(title) {
+  const topics = topicsForCourse(title);
+  return topics.length ? `<ol class="unified-topic-list">${topics.map(topic=>`<li><label class="field"><span>${escapeText(topic)}</span><select data-topic-mastery="${escapeText(topic)}" data-course="${escapeText(title)}" aria-label="${escapeText(topic)} konu hâkimiyeti">${[['unknown','Bilmiyorum'],['partial','Kısmen biliyorum'],['known','Çözebiliyorum']].map(([value,label])=>`<option value="${value}" ${topicMastery(title,topic)===value?'selected':''}>${label}</option>`).join('')}</select></label></li>`).join('')}</ol>` : empty('Henüz konu yok.');
+}
+
+function updateCourseNavigationOffset() {
+  const header = document.querySelector('.sidebar');
+  if (header) document.documentElement.style.setProperty('--app-nav-height', `${Math.ceil(header.getBoundingClientRect().height)}px`);
+}
+window.addEventListener('load', () => {
+  const header = document.querySelector('.sidebar');
+  if (header && typeof ResizeObserver !== 'undefined') new ResizeObserver(updateCourseNavigationOffset).observe(header);
+  updateCourseNavigationOffset();
+});
+
+function openCourseSection(prefix, index) {
+  const target=document.getElementById(`${prefix}-${index}`);
+  if(!target)return;
+  updateCourseNavigationOffset();
+  document.querySelectorAll(`details[name="${prefix}-topics"]`).forEach(d=>{d.open=d===target;});
+  target.open=true;
+  target.scrollIntoView({block:'start',behavior:'smooth'});
+  target.querySelector('summary')?.focus({preventScroll:true});
+}
+
+document.addEventListener('change',event=>{
+  if(event.target.matches('[data-course-jump]') && event.target.value!=='')openCourseSection(event.target.dataset.courseJump,event.target.value);
+  if(event.target.dataset.topicMastery){
+    const card=event.target.closest('details[data-course-card]');
+    if(card){
+      const topics=topicsForCourse(card.dataset.courseCard);
+      const count=topics.filter(t=>topicMastery(card.dataset.courseCard,t)==='known').length;
+      const badge=card.querySelector('[data-topic-progress]');
+      if(badge)badge.textContent=`${count}/${topics.length} konu hazır`;
+    }
+  }
+});
+document.addEventListener('click',event=>{
+  const close=event.target.closest('[data-course-collapse]');
+  if(close){document.querySelectorAll('details[data-course-card]').forEach(d=>{d.open=false;});document.querySelector('.course-jump-nav')?.scrollIntoView({block:'start',behavior:'smooth'});}
+  const jump=event.target.closest('[data-open-course]');
+  if(jump){event.preventDefault();openCourseSection(jump.dataset.prefix || 'course',jump.dataset.openCourse);}
+});
+
+
 // Source: app-core.js
 const icons = {
   layers: '<path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/>',
@@ -916,18 +1784,19 @@ const icons = {
 };
 
 const pages = {
+  gunlukler: 'Kişisel günlükler',
+  projeler: 'Hobi projeleri',
   kitaplar: 'Kitap günlüğü',
   bugun: 'Bugün',
-  dersler: 'Derslerim',
+  dersler: 'Final konuları',
   program: 'Ders programı',
   takvim: 'Sınav ve teslimler',
   notlar: 'Notlar',
   calisma: 'Çalışma programı',
   dokumanlar: 'Dokümanlar',
   uyku: 'Uyku',
-  iliski: 'Kız arkadaş',
+  iliski: 'Birlikte planlar',
   spor: 'Spor',
-  odak: 'Odak',
   hafta: 'Haftalık özet',
   esitle: 'Eşitleme',
   kesfet: 'Keşfet',
@@ -942,18 +1811,7 @@ let editorType;
 let editedRecord;
 
 const examples = {
-  events: [
-    { id: 'e1', day: today, time: '09:00', title: 'Lineer Cebir', detail: 'Ders • A-204', kind: 'lesson', attending: true },
-    { id: 'e2', day: today, time: '11:00', title: 'Veri Yapıları', detail: 'Ders • Bilgisayar laboratuvarı', kind: 'lesson', attending: true },
-    { id: 'e3', day: today, time: '15:30', title: 'Lineer Cebir tekrar oturumu', detail: 'Bireysel çalışma • 45 dk', kind: 'study', attending: true },
-  ],
-  tasks: [
-    { id: 't1', day: today, title: 'Lineer Cebir soru seti', priority: 'Öncelikli', done: false },
-    { id: 't2', day: today, title: 'Veri Yapıları ödevini gözden geçir', priority: 'Normal', done: false },
-    { id: 't3', day: today, title: 'Analiz ders notlarını toparla', priority: 'Normal', done: true },
-  ],
-  grades: [{ id: 'g1', title: 'Lineer Cebir', value: 58 }, { id: 'g2', title: 'Veri Yapıları', value: 76 }, { id: 'g3', title: 'Analiz', value: 84 }],
-  documents: [],
+  events: [], tasks: [], grades: [], documents: [],
   sleep: { bedtime: '23:30', duration: 8 },
 };
 
@@ -965,6 +1823,8 @@ state.focusLogs ??= [];
 state.courseTopics ??= {};
 state.topicMastery ??= {};
 state.dailyChecks ??= {};
+state.topicReviews ??= [];
+state.reflections ??= {};
 state.planning ??= { travelMinutes: 20, breakMinutes: 10, mealMinutes: 30, meals: ['08:00', '12:30', '19:00'], dailyStudyMinutes: 180 };
 const content = document.querySelector('#content');
 const dialog = document.querySelector('#editor');
@@ -973,9 +1833,9 @@ const status = document.querySelector('#status');
 
 function readState() {
   try {
-    return withoutDemoRecords(JSON.parse(localStorage.getItem(storageKey)) ?? examples);
+    return withoutDemoRecords(applyFinalSeason(upgradeCourseCatalog(JSON.parse(localStorage.getItem(storageKey)) ?? structuredClone(examples))));
   } catch {
-    return withoutDemoRecords(examples);
+    return withoutDemoRecords(applyFinalSeason(upgradeCourseCatalog(structuredClone(examples))));
   }
 }
 
@@ -1139,18 +1999,16 @@ function dashboard() {
   const doneCount = tasks.filter(task => task.done).length;
   const focus = coursePriorities().find(course => course.observed !== null && course.level > 0);
   const sleep = sleepTimes();
-  return `${intro(selectedDay === today ? 'Bugün' : 'Günün planı', '', true)}
-    <section class="panel dashboard-focus" aria-labelledby="focus-title">
-      ${icon('sparkle', 'tile-icon')}
-      <div><h2 id="focus-title">${focus ? escapeText(focus.title) : 'Çalışma planı'}</h2>
-        ${focus ? `<p>${escapeText(focus.reason)}</p>${passingLine(focus.passing)}` : ''}</div>
-      <a href="#calisma" class="text-link">Planı aç ${icon('arrow')}</a>
-    </section>
+  return `<section class="hub-overview" aria-label="Günün özeti">
+    ${intro(selectedDay === activeDay() ? 'Bugün' : 'Günün planı', '', true)}
     <div class="metrics">
       ${metric('book', 'Katılacağın ders', `${attending.length} ders`)}
       ${metric('check', 'Tamamlanan görev', `${doneCount} / ${tasks.length}`, 'mint')}
       ${metric('moon', 'Uyku planın', `${sleep.bedtime} – ${sleep.wake}`, 'blue')}
-    </div>
+    </div></section>
+    ${nextActionCard()}
+    <div class="productivity-shortcuts"><a class="button secondary" href="#ara">Her yerde ara</a><a class="button secondary" href="#degerlendirme">Gün sonu</a><a class="button secondary" href="#uygulama">Telefon ve çevrimdışı</a></div>
+    ${hubSpaces()}
     <div class="dashboard-grid">
       <section class="panel">
         ${panelHeading('Günlük program', '', `<a href="#program" class="text-link">Programa git ${icon('arrow')}</a>`)}
@@ -1161,9 +2019,11 @@ function dashboard() {
         ${tasksList(tasks)}
       </section>
     </div>
-    ${dailyControls()}
-    ${dashboardPlanning()}
+    ${focus ? `<section class="panel dashboard-focus" aria-labelledby="focus-title">${icon('sparkle','tile-icon')}<div><h2 id="focus-title">${escapeText(focus.title)}</h2><p>${escapeText(focus.reason)}</p>${passingLine(focus.passing)}</div><a href="#calisma" class="text-link">Planı aç ${icon('arrow')}</a></section>` : ''}
+    <details class="panel hub-details"><summary>Günlük kontroller ve yaklaşanlar</summary>
+    ${dailyControls()}${dashboardPlanning()}</details>
     ${dailyMusicCard()}`;
+
 }
 
 function program() {
@@ -1182,28 +2042,13 @@ function program() {
     </section>`;
 }
 
-function sports() {
-  const workouts = eventsForDay().filter(event => event.kind === 'workout');
-  return `${intro('Spor', 'Antrenmanlarını planla ve tamamladıklarını işaretle.', true)}
-    <section class="panel page-panel">
-      ${panelHeading('Antrenmanlar', '', button('add-workout', 'Antrenman ekle'))}
-      ${weekStrip()}
-      ${workouts.length ? `<ul class="record-list">${workouts.map(workout => `
-        <li class="record-row"><label>
-          <input type="checkbox" data-workout="${workout.id}" ${workout.done ? 'checked' : ''} aria-label="${escapeText(workout.title)} antrenmanını tamamladım">
-          <span><span class="row-title">${escapeText(workout.title)}</span><small class="row-meta">${eventTime(workout)} · ${escapeText(workout.detail)}${workout.repeat === 'weekly' ? ' · Her hafta' : ''}</small></span>
-        </label>${attendancePill(workout)}${editButton('workout', workout)}</li>`).join('')}</ul>` : empty('Bu gün için planlanmış antrenman yok.')}
-    </section>
-    ${fitnessPlan()}`;
-}
-
 function grades() {
-  const entries = orderedAssessments();
-  const titles = new Map(courseCatalog.map(([name]) => [courseKey(name), name]));
+  const entries = orderedAssessments(true);
+  const titles = new Map(enrolledCourseNames().map((name) => [courseKey(name), name]));
   entries.forEach(entry => { if (!titles.has(courseKey(entry.course))) titles.set(courseKey(entry.course), entry.course); });
   const progress = new Map(weightedCourses().map(course => [course.key, course]));
   const priorities = new Map(coursePriorities().map(course => [course.key, course]));
-  return `${intro('Notlar', 'Vize %37,5 · Kısa sınav %12,5 · Final / bütünleme %50')}
+  return `${intro('Notlar', 'Vize %30 · Kısa sınav %20 · Final / bütünleme %50')}
     <div class="course-grid">${[...titles].map(([key, name]) => {
       const records = entries.filter(entry => courseKey(entry.course) === key);
       const result = progress.get(key);
@@ -1219,7 +2064,7 @@ function grades() {
         </div>
       </details>`;
     }).join('')}</div>
-    <p class="row-meta planning-panel">Harf tahmini NEÜ lisans yönetmeliğindeki standart puan aralıklarına göre hesaplanır. Öğretim elemanı AA–CB sınırlarını aşağı çekebilir. Resmî not için OBS’yi esas al.</p>
+    <p class="row-meta planning-panel">Harf aralıkları ve not ağırlıkları örnektir.</p>
     ${gradeScenarios()}
     ${weightedGrades()}
     ${state.grades.length ? `<section class="panel page-panel planning-panel">${panelHeading('Önceki genel notlar')}
@@ -1242,10 +2087,13 @@ function sleepPage() {
 }
 
 function render() {
-  const views = { kitaplar: booksPage, bugun: dashboard, dersler: coursesPage, program, takvim: assessmentsPage, notlar: grades, calisma: studyProgramPage, dokumanlar: documents, uyku: sleepPage, iliski: relationshipPage, spor: sports, odak: focusPage, hafta: weeklyPage, kesfet: discoverPage, esitle: syncPage };
+  const views = { projeler: projectsPage, kitaplar: booksPage, bugun: dashboard, dersler: coursesPage, program, takvim: assessmentsPage, notlar: grades, calisma: studyProgramPage, dokumanlar: documents, uyku: sleepPage, iliski: relationshipPage, spor: sports, hafta: weeklyPage, kesfet: discoverPage, esitle: syncPage };
+  Object.assign(views, spaceViews(), productivityViews());
+  if (location.hash === '#hazirlik') history.replaceState(null, '', '#dersler');
   const requested = location.hash.slice(1);
   const page = Object.hasOwn(views, requested) ? requested : 'bugun';
-  const label = pages[page];
+  const label = spacePageLabel(page) ?? ({tekrar:'Aralıklı tekrar',ara:'Her yerde ara',degerlendirme:'Gün sonu',uygulama:'Uygulama kurulumu'})[page] ?? pages[page];
+  renderSpaceNavigation(page);
   document.title = `${label} · Everything App`;
   document.querySelector('#current-page').textContent = label;
   document.querySelectorAll('[data-page]').forEach(link => {
@@ -1253,17 +2101,13 @@ function render() {
     else link.removeAttribute('aria-current');
   });
   content.innerHTML = views[page]();
+  updateCourseNavigationOffset();
+  if (page === 'uygulama') void updateOfflineStatus();
   fillIcons();
   if (page === 'kesfet') void refreshDiscoverNews();
+  if (page === 'merak') void refreshDailyDiscovery();
   if (page === 'bugun') void refreshDailyMusic();
 }
-
-const moreMenu = document.querySelector('.nav-more');
-moreMenu.addEventListener('click', event => {
-  if (!event.target.closest('a[data-page]') || !window.matchMedia('(max-width: 810px)').matches) return;
-  moreMenu.open = false;
-  moreMenu.querySelector('summary').focus({ preventScroll: true });
-});
 
 function field(label, input) {
   return `<label class="field"><span>${label}</span>${input}</label>`;
@@ -1413,7 +2257,7 @@ document.addEventListener('click', event => {
     render();
     document.querySelector('[data-action="pick-day"][aria-pressed="true"]')?.focus();
   } else if (action === 'prev-day' || action === 'next-day' || action === 'today') {
-    if (action === 'today') selectedDay = today;
+    if (action === 'today') selectedDay = activeDay();
     else selectedDay = shiftDay(selectedDay, action === 'prev-day' ? -1 : 1);
     render();
     document.querySelector(`[data-action="${action}"]`)?.focus();

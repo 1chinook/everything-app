@@ -22,18 +22,19 @@ const icons = {
 };
 
 const pages = {
+  gunlukler: 'Kişisel günlükler',
+  projeler: 'Hobi projeleri',
   kitaplar: 'Kitap günlüğü',
   bugun: 'Bugün',
-  dersler: 'Derslerim',
+  dersler: 'Final konuları',
   program: 'Ders programı',
   takvim: 'Sınav ve teslimler',
   notlar: 'Notlar',
   calisma: 'Çalışma programı',
   dokumanlar: 'Dokümanlar',
   uyku: 'Uyku',
-  iliski: 'Kız arkadaş',
+  iliski: 'Birlikte planlar',
   spor: 'Spor',
-  odak: 'Odak',
   hafta: 'Haftalık özet',
   esitle: 'Eşitleme',
   kesfet: 'Keşfet',
@@ -48,18 +49,7 @@ let editorType;
 let editedRecord;
 
 const examples = {
-  events: [
-    { id: 'e1', day: today, time: '09:00', title: 'Lineer Cebir', detail: 'Ders • A-204', kind: 'lesson', attending: true },
-    { id: 'e2', day: today, time: '11:00', title: 'Veri Yapıları', detail: 'Ders • Bilgisayar laboratuvarı', kind: 'lesson', attending: true },
-    { id: 'e3', day: today, time: '15:30', title: 'Lineer Cebir tekrar oturumu', detail: 'Bireysel çalışma • 45 dk', kind: 'study', attending: true },
-  ],
-  tasks: [
-    { id: 't1', day: today, title: 'Lineer Cebir soru seti', priority: 'Öncelikli', done: false },
-    { id: 't2', day: today, title: 'Veri Yapıları ödevini gözden geçir', priority: 'Normal', done: false },
-    { id: 't3', day: today, title: 'Analiz ders notlarını toparla', priority: 'Normal', done: true },
-  ],
-  grades: [{ id: 'g1', title: 'Lineer Cebir', value: 58 }, { id: 'g2', title: 'Veri Yapıları', value: 76 }, { id: 'g3', title: 'Analiz', value: 84 }],
-  documents: [],
+  events: [], tasks: [], grades: [], documents: [],
   sleep: { bedtime: '23:30', duration: 8 },
 };
 
@@ -71,6 +61,8 @@ state.focusLogs ??= [];
 state.courseTopics ??= {};
 state.topicMastery ??= {};
 state.dailyChecks ??= {};
+state.topicReviews ??= [];
+state.reflections ??= {};
 state.planning ??= { travelMinutes: 20, breakMinutes: 10, mealMinutes: 30, meals: ['08:00', '12:30', '19:00'], dailyStudyMinutes: 180 };
 const content = document.querySelector('#content');
 const dialog = document.querySelector('#editor');
@@ -79,9 +71,9 @@ const status = document.querySelector('#status');
 
 function readState() {
   try {
-    return withoutDemoRecords(JSON.parse(localStorage.getItem(storageKey)) ?? examples);
+    return withoutDemoRecords(applyFinalSeason(upgradeCourseCatalog(JSON.parse(localStorage.getItem(storageKey)) ?? structuredClone(examples))));
   } catch {
-    return withoutDemoRecords(examples);
+    return withoutDemoRecords(applyFinalSeason(upgradeCourseCatalog(structuredClone(examples))));
   }
 }
 
@@ -245,18 +237,16 @@ function dashboard() {
   const doneCount = tasks.filter(task => task.done).length;
   const focus = coursePriorities().find(course => course.observed !== null && course.level > 0);
   const sleep = sleepTimes();
-  return `${intro(selectedDay === today ? 'Bugün' : 'Günün planı', '', true)}
-    <section class="panel dashboard-focus" aria-labelledby="focus-title">
-      ${icon('sparkle', 'tile-icon')}
-      <div><h2 id="focus-title">${focus ? escapeText(focus.title) : 'Çalışma planı'}</h2>
-        ${focus ? `<p>${escapeText(focus.reason)}</p>${passingLine(focus.passing)}` : ''}</div>
-      <a href="#calisma" class="text-link">Planı aç ${icon('arrow')}</a>
-    </section>
+  return `<section class="hub-overview" aria-label="Günün özeti">
+    ${intro(selectedDay === activeDay() ? 'Bugün' : 'Günün planı', '', true)}
     <div class="metrics">
       ${metric('book', 'Katılacağın ders', `${attending.length} ders`)}
       ${metric('check', 'Tamamlanan görev', `${doneCount} / ${tasks.length}`, 'mint')}
       ${metric('moon', 'Uyku planın', `${sleep.bedtime} – ${sleep.wake}`, 'blue')}
-    </div>
+    </div></section>
+    ${nextActionCard()}
+    <div class="productivity-shortcuts"><a class="button secondary" href="#ara">Her yerde ara</a><a class="button secondary" href="#degerlendirme">Gün sonu</a><a class="button secondary" href="#uygulama">Telefon ve çevrimdışı</a></div>
+    ${hubSpaces()}
     <div class="dashboard-grid">
       <section class="panel">
         ${panelHeading('Günlük program', '', `<a href="#program" class="text-link">Programa git ${icon('arrow')}</a>`)}
@@ -267,9 +257,11 @@ function dashboard() {
         ${tasksList(tasks)}
       </section>
     </div>
-    ${dailyControls()}
-    ${dashboardPlanning()}
+    ${focus ? `<section class="panel dashboard-focus" aria-labelledby="focus-title">${icon('sparkle','tile-icon')}<div><h2 id="focus-title">${escapeText(focus.title)}</h2><p>${escapeText(focus.reason)}</p>${passingLine(focus.passing)}</div><a href="#calisma" class="text-link">Planı aç ${icon('arrow')}</a></section>` : ''}
+    <details class="panel hub-details"><summary>Günlük kontroller ve yaklaşanlar</summary>
+    ${dailyControls()}${dashboardPlanning()}</details>
     ${dailyMusicCard()}`;
+
 }
 
 function program() {
@@ -288,28 +280,13 @@ function program() {
     </section>`;
 }
 
-function sports() {
-  const workouts = eventsForDay().filter(event => event.kind === 'workout');
-  return `${intro('Spor', 'Antrenmanlarını planla ve tamamladıklarını işaretle.', true)}
-    <section class="panel page-panel">
-      ${panelHeading('Antrenmanlar', '', button('add-workout', 'Antrenman ekle'))}
-      ${weekStrip()}
-      ${workouts.length ? `<ul class="record-list">${workouts.map(workout => `
-        <li class="record-row"><label>
-          <input type="checkbox" data-workout="${workout.id}" ${workout.done ? 'checked' : ''} aria-label="${escapeText(workout.title)} antrenmanını tamamladım">
-          <span><span class="row-title">${escapeText(workout.title)}</span><small class="row-meta">${eventTime(workout)} · ${escapeText(workout.detail)}${workout.repeat === 'weekly' ? ' · Her hafta' : ''}</small></span>
-        </label>${attendancePill(workout)}${editButton('workout', workout)}</li>`).join('')}</ul>` : empty('Bu gün için planlanmış antrenman yok.')}
-    </section>
-    ${fitnessPlan()}`;
-}
-
 function grades() {
-  const entries = orderedAssessments();
-  const titles = new Map(courseCatalog.map(([name]) => [courseKey(name), name]));
+  const entries = orderedAssessments(true);
+  const titles = new Map(enrolledCourseNames().map((name) => [courseKey(name), name]));
   entries.forEach(entry => { if (!titles.has(courseKey(entry.course))) titles.set(courseKey(entry.course), entry.course); });
   const progress = new Map(weightedCourses().map(course => [course.key, course]));
   const priorities = new Map(coursePriorities().map(course => [course.key, course]));
-  return `${intro('Notlar', 'Vize %37,5 · Kısa sınav %12,5 · Final / bütünleme %50')}
+  return `${intro('Notlar', 'Vize %30 · Kısa sınav %20 · Final / bütünleme %50')}
     <div class="course-grid">${[...titles].map(([key, name]) => {
       const records = entries.filter(entry => courseKey(entry.course) === key);
       const result = progress.get(key);
@@ -325,7 +302,7 @@ function grades() {
         </div>
       </details>`;
     }).join('')}</div>
-    <p class="row-meta planning-panel">Harf tahmini NEÜ lisans yönetmeliğindeki standart puan aralıklarına göre hesaplanır. Öğretim elemanı AA–CB sınırlarını aşağı çekebilir. Resmî not için OBS’yi esas al.</p>
+    <p class="row-meta planning-panel">Harf aralıkları ve not ağırlıkları örnektir.</p>
     ${gradeScenarios()}
     ${weightedGrades()}
     ${state.grades.length ? `<section class="panel page-panel planning-panel">${panelHeading('Önceki genel notlar')}
@@ -348,10 +325,13 @@ function sleepPage() {
 }
 
 function render() {
-  const views = { kitaplar: booksPage, bugun: dashboard, dersler: coursesPage, program, takvim: assessmentsPage, notlar: grades, calisma: studyProgramPage, dokumanlar: documents, uyku: sleepPage, iliski: relationshipPage, spor: sports, odak: focusPage, hafta: weeklyPage, kesfet: discoverPage, esitle: syncPage };
+  const views = { projeler: projectsPage, kitaplar: booksPage, bugun: dashboard, dersler: coursesPage, program, takvim: assessmentsPage, notlar: grades, calisma: studyProgramPage, dokumanlar: documents, uyku: sleepPage, iliski: relationshipPage, spor: sports, hafta: weeklyPage, kesfet: discoverPage, esitle: syncPage };
+  Object.assign(views, spaceViews(), productivityViews());
+  if (location.hash === '#hazirlik') history.replaceState(null, '', '#dersler');
   const requested = location.hash.slice(1);
   const page = Object.hasOwn(views, requested) ? requested : 'bugun';
-  const label = pages[page];
+  const label = spacePageLabel(page) ?? ({tekrar:'Aralıklı tekrar',ara:'Her yerde ara',degerlendirme:'Gün sonu',uygulama:'Uygulama kurulumu'})[page] ?? pages[page];
+  renderSpaceNavigation(page);
   document.title = `${label} · Everything App`;
   document.querySelector('#current-page').textContent = label;
   document.querySelectorAll('[data-page]').forEach(link => {
@@ -359,17 +339,13 @@ function render() {
     else link.removeAttribute('aria-current');
   });
   content.innerHTML = views[page]();
+  updateCourseNavigationOffset();
+  if (page === 'uygulama') void updateOfflineStatus();
   fillIcons();
   if (page === 'kesfet') void refreshDiscoverNews();
+  if (page === 'merak') void refreshDailyDiscovery();
   if (page === 'bugun') void refreshDailyMusic();
 }
-
-const moreMenu = document.querySelector('.nav-more');
-moreMenu.addEventListener('click', event => {
-  if (!event.target.closest('a[data-page]') || !window.matchMedia('(max-width: 810px)').matches) return;
-  moreMenu.open = false;
-  moreMenu.querySelector('summary').focus({ preventScroll: true });
-});
 
 function field(label, input) {
   return `<label class="field"><span>${label}</span>${input}</label>`;
@@ -519,7 +495,7 @@ document.addEventListener('click', event => {
     render();
     document.querySelector('[data-action="pick-day"][aria-pressed="true"]')?.focus();
   } else if (action === 'prev-day' || action === 'next-day' || action === 'today') {
-    if (action === 'today') selectedDay = today;
+    if (action === 'today') selectedDay = activeDay();
     else selectedDay = shiftDay(selectedDay, action === 'prev-day' ? -1 : 1);
     render();
     document.querySelector(`[data-action="${action}"]`)?.focus();

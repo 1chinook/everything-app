@@ -1,2 +1,10 @@
 daily-music.local.json
 spotify-config.local.json
+startup.local.log
+startup-error.local.txt
+/Everything App.lnk
+
+*.bundle
+*.local.*
+daily-news.json
+.env*

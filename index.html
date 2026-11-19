@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#101119">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/app-icon-192.png">
+  <meta name="theme-color" content="#f7f7f2">
   <meta name="description" content="Everything App ile derslerini, görevlerini ve günlük planını bir arada gör.">
   <title>Bugün · Everything App</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -24,31 +26,9 @@
   <div class="shell">
     <aside class="sidebar" aria-label="Kenar menüsü">
       <a href="#bugun" class="brand"><span class="brand-icon" data-icon="layers"></span><span>Everything<span class="brand-suffix"> App</span></span></a>
-      <nav class="navigation" aria-label="Ana menü">
-        <div class="nav-group nav-primary">
-          <a href="#bugun" data-page="bugun"><span data-icon="home"></span>Bugün</a>
-          <a href="#takvim" data-page="takvim"><span data-icon="calendar"></span>Takvim</a>
-          <a href="#notlar" data-page="notlar"><span data-icon="chart"></span>Notlar</a>
-        </div>
-        <details class="nav-more">
-          <summary><span>Daha fazla</span><span data-icon="chevron-right"></span></summary>
-          <div class="nav-group">
-            <a href="#dersler" data-page="dersler"><span data-icon="book"></span>Derslerim</a>
-            <a href="#program" data-page="program"><span data-icon="calendar"></span>Ders programı</a>
-            <a href="#calisma" data-page="calisma"><span data-icon="sparkle"></span>Çalışma programı</a>
-            <a href="#dokumanlar" data-page="dokumanlar"><span data-icon="file"></span>Dokümanlar</a>
-            <a href="#odak" data-page="odak"><span data-icon="timer"></span>Odak</a>
-            <a href="#hafta" data-page="hafta"><span data-icon="chart"></span>Haftalık özet</a>
-            <a href="#uyku" data-page="uyku"><span data-icon="moon"></span>Uyku</a>
-            <a href="#spor" data-page="spor"><span data-icon="dumbbell"></span>Spor</a>
-            <a href="#iliski" data-page="iliski"><span data-icon="heart"></span>Kız arkadaş</a>
-            <a href="#kesfet" data-page="kesfet"><span data-icon="compass"></span>Keşfet</a>
-            <a href="#kitaplar" data-page="kitaplar"><span data-icon="book"></span>Kitap günlüğü</a>
-            <a href="#esitle" data-page="esitle"><span data-icon="sync"></span>Eşitleme</a>
-          </div>
-        </details>
-      </nav>
-      <div class="profile"><span class="avatar">Y</span><div><strong>Yusuf</strong><small>Öğrenci</small></div></div>
+      <nav class="navigation" id="space-navigation" aria-label="Alan menüsü"></nav>
+      <a class="button secondary" href="#ara" aria-label="Site genelinde ara">Her yerde ara</a>
+
     </aside>
     <main class="workspace" id="main">
       <header class="topbar">

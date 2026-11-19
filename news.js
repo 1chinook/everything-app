@@ -1,6 +1,6 @@
 'use strict';
 
-const { createHash } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const sources = [
@@ -60,10 +60,12 @@ function createNewsReader({ fetchFeed = fetch, clock = Date.now, directory } = {
     pending = (async () => {
       const now = clock();
       const day = turkeyDate.format(now);
+      let changed = false;
       await Promise.all(sources.map(async source => {
         const url = source[2];
         const previous = cache.get(url);
         if (previous?.day === day || previous?.retryAfter > now) return;
+        changed = true;
         try {
           const response = await fetchFeed(url, { signal: AbortSignal.timeout(6000), redirect: 'follow' });
           if (!response.ok) throw new Error('feed');
@@ -74,8 +76,8 @@ function createNewsReader({ fetchFeed = fetch, clock = Date.now, directory } = {
           cache.set(url, { ...previous, retryAfter: now + 15 * 60000 });
         }
       }));
-      if (cacheFile) {
-        const draft = cacheFile + '.' + createHash('sha256').update(String(now)).digest('hex').slice(0, 12) + '.tmp';
+      if (cacheFile && changed) {
+        const draft = cacheFile + '.' + randomUUID() + '.tmp';
         try {
           fs.mkdirSync(directory, { recursive: true });
           fs.writeFileSync(draft, JSON.stringify([...cache]), { flag: 'wx' });

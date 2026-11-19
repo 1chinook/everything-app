@@ -35,12 +35,12 @@
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: 9px;
-  background: rgba(126, 148, 206, 0.07);
+  background: rgba(174, 191, 180, 0.04);
 }
 
 .fitness-metrics > div:nth-child(2) {
-  background: rgba(112, 196, 169, 0.1);
-  border-color: rgba(112, 196, 169, 0.35);
+  background: rgba(174, 191, 180, 0.04);
+  border-color: var(--border);
 }
 
 .fitness-metrics strong {
@@ -141,3 +141,6 @@
     justify-self: start;
   }
 }
+.coach-session{display:grid;gap:14px;border:1px solid #c4ded4;border-radius:14px;background:#f3faf6;padding:16px}.coach-session progress{width:100%;accent-color:#087553}.coach-session h3,.coach-session p{margin:0}#training-desk .fitness-body{display:grid;gap:14px}#training-desk summary{cursor:pointer;padding:8px 0}#training-desk .fitness-actions [aria-pressed=true]{background:#155441;color:white}#training-desk .fitness-subpanel form{margin-top:12px}
+.workout-simple{margin-bottom:18px}.workout-inner{padding:16px 20px;display:grid;gap:12px}.workout-inner form{display:grid;gap:14px}.workout-picks,.workout-line{display:flex;align-items:center;flex-wrap:wrap;gap:10px}.workout-picks small{width:100%}.workout-fields{display:grid;grid-template-columns:2fr 1fr;gap:12px}.workout-inner small{display:block;color:var(--muted)}.workout-inner summary{cursor:pointer}.workout-line{justify-content:space-between;border-bottom:1px solid var(--border);padding:8px 0}.sport-energy{color:#087553}.workout-inner .field input,.workout-inner select{min-width:0;width:100%}@media(max-width:560px){.workout-fields{grid-template-columns:1fr}}
+.workout-duration {display:grid;grid-template-columns:minmax(5rem,1fr) minmax(5rem,auto);gap:8px}.workout-inner [data-sports-feedback]:empty {display:none}

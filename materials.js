@@ -65,7 +65,7 @@ function materialReview() {
     ${panelHeading('Çıkarılan bilgileri kontrol et', 'Başlık ve tarih önerilerini düzenle. Yalnızca işaretlediklerin kaydedilir.')}
     <form id="material-review-form" class="sync-content form-fields">
       <strong class="row-title">${escapeText(preview.name)} · ${escapeText(preview.course)}</strong>
-      ${field('Dersin konularına eklenecek başlıklar', `<textarea name="topics" rows="5" maxlength="2500">${escapeText(preview.topics.join('\n'))}</textarea>`)}
+      ${field('Dersin konularına eklenecek başlıklar', `<textarea name="topics" rows="5" maxlength="15000">${escapeText(preview.topics.join('\n'))}</textarea>`)}
       <p class="row-meta">Konu listesi mevcut konulara eklenir. Sınav kapsamını takvim kaydında ayrıca seçebilirsin.</p>
       ${preview.dates.length ? preview.dates.map((date, index) => `<fieldset class="material-date">
         <legend><label><input type="checkbox" name="include-${index}"> Bu tarihi takvime ekle</label></legend>
@@ -183,8 +183,8 @@ document.addEventListener('submit', async event => {
   }
   const course = materialPreview.course;
   const key = courseKey(course);
-  const merged = [...new Set([...topicsForCourse(course), ...topicLines(data.get('topics'))])];
-  if (merged.join('\n').length > 2500) {
+  const merged = groupCourseTopics(course, [...topicsForCourse(course), ...topicLines(data.get('topics'))]);
+  if (merged.join('\n').length > 15000) {
     document.querySelector('#material-review-status').textContent = 'Toplam konu listesi çok uzun. Eklenecek başlıkları kısalt.';
     return;
   }

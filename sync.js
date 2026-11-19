@@ -15,7 +15,7 @@ function validPlannerData(data) {
   const map = (value, keyCheck, valueCheck) => value == null || typeof value === 'object' && !Array.isArray(value) &&
     Object.entries(value).every(([key, item]) => keyCheck(key) && valueCheck(item));
   const boolean = value => typeof value === 'boolean';
-  return list(data.events, item => day(item.day) && time(item.time) && optional(item.endTime, time) &&
+  return optional(data.finalScheduleVersion, v => Number.isInteger(v) && v >= 0 && v <= 1000) && optional(data.courseCatalogVersion, v => Number.isInteger(v) && v >= 0 && v <= 1000) && list(data.events, item => day(item.day) && time(item.time) && optional(item.endTime, time) &&
     text(item.title) && text(item.detail) && ['lesson', 'study', 'workout'].includes(item.kind) && boolean(item.attending) &&
     optional(item.repeat, value => ['once', 'weekly'].includes(value)) && map(item.attendance, day, boolean) &&
     map(item.completion, day, boolean) &&
@@ -31,18 +31,20 @@ function validPlannerData(data) {
     list(data.grades, item => text(item.title) && range(item.value, 0, 100)) &&
     list(data.documents, item => text(item.name) && optional(item.course, text)) &&
     data.sleep && time(data.sleep.bedtime) && range(data.sleep.duration, 0.5, 24) &&
-    (data.assessments == null || list(data.assessments, item => text(item.title) && text(item.course) && day(item.day) && time(item.time) &&
+    (data.assessments == null || list(data.assessments, item => text(item.title) && text(item.course) && day(item.day) && time(item.time) && optional(item.endTime, time) && optional(item.room, text) &&
       ['exam', 'deadline', 'midterm', 'quiz', 'final'].includes(item.kind) && range(item.weight, 0, 100) &&
       (item.grade === null || range(item.grade, 0, 100)) && Array.isArray(item.topics) && item.topics.every(text))) &&
     map(data.targets, key => key.startsWith('course:'), value => range(value, 0, 100)) &&
     map(data.courseTopics, key => key.startsWith('course:'), value => Array.isArray(value) &&
-      value.every(topic => typeof topic === 'string' && topic.length <= 2500) && value.join('\n').length <= 2500) &&
+      value.every(topic => typeof topic === 'string' && topic.length <= 2500) && value.join('\n').length <= 15000) &&
     map(data.topicMastery, key => key.startsWith('course:'), value => map(value, text,
       level => ['unknown', 'partial', 'known'].includes(level))) &&
     map(data.dailyChecks, day, value => map(value, key => ['steps', 'sleep'].includes(key), boolean)) &&
     (data.planning == null || range(data.planning.travelMinutes, 0, 120) && range(data.planning.breakMinutes, 0, 60) &&
       range(data.planning.mealMinutes, 0, 120) && range(data.planning.dailyStudyMinutes, 30, 720) &&
       Array.isArray(data.planning.meals) && data.planning.meals.length <= 6 && data.planning.meals.every(time)) &&
+    (data.topicReviews == null || Array.isArray(data.topicReviews) && data.topicReviews.length <= 5000 && data.topicReviews.every(r => r && text(r.course) && typeof r.topic === 'string' && r.topic.length <= 2500 && day(r.due) && day(r.last) && range(r.interval,1,180))) &&
+    map(data.reflections, day, r => r && text(r.wins) && text(r.obstacles) && text(r.next) && typeof r.saved === 'boolean') &&
     (data.focusLogs == null || list(data.focusLogs, item => text(item.title) && text(item.course) && day(item.day) &&
       range(item.planned, 1, 180) && range(item.seconds, 0, 10800)));
 }
@@ -58,7 +60,7 @@ let syncTimer;
 function syncPage() {
   const browserFile = location.protocol === 'file:';
   const message = syncMessage || (syncSession ? 'Bağlı. Değişiklikler açık sekmeler arasında eşitlenir.' : 'Henüz bağlanmadı.');
-  return `${intro('Eşitleme', 'Bilgisayar ve telefon arasında aynı planı kullan.')}
+  return `${intro('Eşitleme', 'Ders planı ve görevler cihazlar arasında eşitlenir. Spor ve kişisel kayıtları taşımak için tam yedeği kullan.')}
     <section class="panel page-panel">
       ${panelHeading('Yerel ağ', browserFile ? 'Bu dosyadan yedek al, ardından aşağıdaki sunucu adresinden içe aktar.' : 'Telefonu ve bilgisayarı aynı ağa bağla.')}
       <div class="sync-content">
@@ -79,7 +81,7 @@ function syncPage() {
       </div>
     </section>
     <section class="panel page-panel planning-panel">
-      ${panelHeading('Yedek', 'Planını JSON olarak indir veya bir yedekten geri al.')}
+      ${panelHeading('Yedek', 'Planını, spor kayıtlarını ve kişisel alanlarını birlikte indir veya geri yükle.')}
       <div class="sync-content sync-actions">
         <button type="button" class="button secondary" data-sync="export">Yedeği indir</button>
         <button type="button" class="button secondary" data-sync="import">Yedek seç</button>
@@ -131,18 +133,19 @@ async function syncRequest(code, body) {
 function replacePlannerData(data) {
   if (!validPlannerData(data)) throw new Error('Bu yedek Everything App kayıt biçimiyle uyumlu değil.');
   if (!createAutomaticBackup(true, 'Veri değiştirme öncesi')) throw new Error('Mevcut plan yedeklenemedi. Önce JSON yedeğini indir.');
-  data = withoutDemoRecords(data);
+  data = withoutDemoRecords(applyFinalSeason(upgradeCourseCatalog(data)));
   Object.assign(state, {
+    courseCatalogVersion: data.courseCatalogVersion, finalScheduleVersion: data.finalScheduleVersion,
     events: data.events, tasks: data.tasks, grades: data.grades, documents: data.documents, sleep: data.sleep,
     assessments: data.assessments ?? [], targets: data.targets ?? {}, focusLogs: data.focusLogs ?? [], courseTopics: data.courseTopics ?? {},
     topicMastery: data.topicMastery ?? {}, dailyChecks: data.dailyChecks ?? {},
+    topicReviews: data.topicReviews ?? [], reflections: data.reflections ?? {},
     planning: data.planning ?? { travelMinutes: 20, breakMinutes: 10, mealMinutes: 30, meals: ['08:00', '12:30', '19:00'], dailyStudyMinutes: 180 },
   });
 }
 
 function applyRemoteData(data) {
-  replacePlannerData(data);
-  save('Sunucudaki plan alındı.', false);
+  restoreLocalBackup(data, undefined, false);
   render();
 }
 
@@ -158,7 +161,7 @@ async function syncAutomatically() {
         showSyncMessage('Kayıtlar farklı. Yerel veya sunucu kopyasını Eşitleme ekranından seç.');
         return;
       }
-      if (document.querySelector('dialog[open]')) return;
+      if (document.querySelector('dialog[open]') || document.activeElement?.closest('form')) return;
       applyRemoteData(remote.data);
       session.revision = remote.revision;
     } else if (session.dirty) {
@@ -224,7 +227,7 @@ function installSyncControls() {
       render();
     }
     if (action === 'export') {
-      const url = URL.createObjectURL(new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }));
+      const url = URL.createObjectURL(new Blob([JSON.stringify({ ...state, backupExtras: snapshotExtras() }, null, 2)], { type: 'application/json' }));
       const link = document.createElement('a');
       link.href = url;
       link.download = 'everything-app-yedek.json';
@@ -238,9 +241,7 @@ function installSyncControls() {
       const data = JSON.parse(await event.target.files[0].text());
       if (!validPlannerData(data)) throw new Error('Bu yedek Everything App kayıt biçimiyle uyumlu değil.');
       if (!window.confirm('Bu cihazdaki plan yedek kopyayla değiştirilsin mi?')) return;
-      replacePlannerData(data);
-      if (data.backupExtras) restoreBackupExtras(data.backupExtras);
-      save('Yedek içe aktarıldı.');
+      restoreLocalBackup(data, data.backupExtras);
       showSyncMessage('Yedek içe aktarıldı.');
       if (data.backupExtras) location.reload();
       else render();

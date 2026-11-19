@@ -1,39 +1,9 @@
 const fitnessStorageKey = 'everything-app-fitness-v1';
-const fitnessLocale = new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 1 });
-const fitnessActivityLevels = {
-  low: { label: 'Günün çoğu oturarak geçiyor, az yürüyüş', factor: 1.4 },
-  moderate: { label: 'Düzenli yürüyüş ve haftada birkaç antrenman', factor: 1.6 },
-  high: { label: 'Günlük hareket yüksek, düzenli antrenman', factor: 1.8 },
-};
-
-const fitnessMonths = [
-  ['Düzeni kur', '2 salon günü · 1–2 set', 'Rahat yürüyüşe 10–20 dakika ile başla. İlk hafta adımlarını ölç, yurt menüsünde sürdürebildiğin seçenekleri bul.'],
-  ['Hacmi artır', '2 salon günü · çoğu harekette 2 set', 'Toparlanman iyiyse yürüyüşlere 5–10 dakika ekle. Haftalık tartı eğilimine ve salon performansına birlikte bak.'],
-  ['Ritmi koru', '2–3 salon günü · 2–3 set', 'Tempolu yürüyüşleri haftaya dağıt. Uygunsa orta yoğunlukta toplam 120–150 dakikaya yaklaş.'],
-  ['Yükü ilerlet', '2–3 salon günü · 2–3 set', 'Üst tekrar sınırına iyi formla ulaşınca küçük bir ağırlık artışı yap. Uygunsa 150 dakika civarında tempolu yürüyüşü sürdür.'],
-  ['Sürdürülebilir hale getir', '2–3 salon günü · toparlanmana göre', 'Sınav haftasında iki tam vücut seansını önceliklendir. İlk kilo hedefine doğru ilerlemeni değerlendir.'],
-];
-
-const fitnessWorkouts = {
-  A: [
-    ['Leg press', '8–12 tekrar'],
-    ['Makinede göğüs press', '8–12 tekrar'],
-    ['Lat pulldown', '8–12 tekrar'],
-    ['Makinede leg curl', '10–15 tekrar'],
-    ['Dead bug', 'Her yana 6–10 tekrar'],
-  ],
-  B: [
-    ['Kutuya goblet squat veya leg press', '8–12 tekrar'],
-    ['Oturarak kablo row', '8–12 tekrar'],
-    ['Eğimli makine veya dambıl press', '8–12 tekrar'],
-    ['Hip thrust veya glute bridge', '10–15 tekrar'],
-    ['Pallof press', 'Her yana 8–12 tekrar'],
-  ],
-};
-
 function readFitnessData() {
   try {
-    return JSON.parse(localStorage.getItem(fitnessStorageKey)) ?? {};
+    const stored = JSON.parse(localStorage.getItem(fitnessStorageKey));
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return {};
+    return stored;
   } catch {
     return {};
   }
@@ -41,205 +11,218 @@ function readFitnessData() {
 
 const fitnessData = readFitnessData();
 
-function fitnessCalorieEstimate({ weight, height, age, sex, activity }) {
-  if (!Number.isFinite(weight) || weight < 35 || weight > 300 || !Number.isFinite(height) || height < 130 || height > 230) return null;
-  if (!Number.isInteger(age) || age < 19 || age > 78 || !Object.hasOwn(fitnessActivityLevels, activity) || !['female', 'male'].includes(sex)) return null;
-  const resting = 10 * weight + 6.25 * height - 5 * age + (sex === 'male' ? 5 : -161);
-  const maintenance = Math.round(resting * fitnessActivityLevels[activity].factor / 50) * 50;
-  const target = Math.round((resting * fitnessActivityLevels[activity].factor - 300) / 50) * 50;
-  const minimum = sex === 'male' ? 1800 : 1500;
-  return { maintenance, target: target >= minimum ? target : null };
-}
-
 function fitnessStepTarget(baseline, month) {
   if (!Number.isInteger(baseline) || baseline < 1 || baseline > 40000) return null;
   const ceiling = Math.max(baseline, 7500);
   return Math.min(ceiling, baseline + [500, 1000, 1500, 2000, 2500][month - 1]);
 }
 
-function fitnessInput(label, name, value, attributes) {
-  return field(label, `<input name="${name}" ${attributes} value="${escapeText(String(value ?? ''))}">`);
+// MET estimates describe the exercise category at ordinary effort.
+const activityChoices = [
+  ['Göğüs press',3.5,'Göğüs'], ['Eğimli şınav',3,'Göğüs'], ['Dambıl bench press',3.5,'Göğüs'],
+  ['Eğimli dambıl press',3.5,'Göğüs'], ['Pec deck',3.5,'Göğüs'], ['Kabloda göğüs açış',3.5,'Göğüs'],
+  ['Dambıl biceps curl',3.5,'Kol'], ['İple triceps itiş',3.5,'Kol'], ['Hammer curl',3.5,'Kol'],
+  ['Kabloda biceps curl',3.5,'Kol'], ['Makinede preacher curl',3.5,'Kol'], ['Baş üstü kabloda triceps açış',3.5,'Kol'],
+  ['Dead bug',3,'Karın'], ['Bird dog',3,'Karın'], ['Diz destekli yan plank',3,'Karın'],
+  ['Ters mekik (reverse crunch)',3,'Karın'], ['Pallof press',3.5,'Karın'], ['Kabloda crunch',3.5,'Karın'],
+  ['Oturarak kablo çekiş',3.5,'Sırt ve omuz'], ['Lat pulldown',3.5,'Sırt ve omuz'], ['Göğüs destekli row',3.5,'Sırt ve omuz'],
+  ['Face pull',3.5,'Sırt ve omuz'], ['Dambıl yana açış',3.5,'Sırt ve omuz'], ['Makinede omuz press',3.5,'Sırt ve omuz'],
+  ['Leg press',3.5,'Bacak'], ['Vücut ağırlığıyla squat',3,'Bacak'], ['Leg curl',3.5,'Bacak'],
+  ['Glute bridge',3,'Bacak'], ['Goblet squat',3.5,'Bacak'], ['Ayakta baldır yükseltme',3,'Bacak'],
+  ['Kürek ergometresi (orta tempo, 100 W altı)',5,'Kardiyo'],
+  ['Başka bir ağırlık hareketi',3.5,'Diğer'], ['Başka bir vücut ağırlığı hareketi',3,'Diğer']
+];
+const movementGroups = [...new Set(activityChoices.map(choice=>choice[2]))];
+
+function movementOptions() {
+  return movementGroups.map(group=>`<optgroup label="${group}">${activityChoices.map(([name,,category],index)=>
+    category===group ? `<option value="${index}">${name}</option>` : '').join('')}</optgroup>`).join('');
 }
 
-function fitnessTargets(profile) {
-  const initialWeight = profile.initialWeight ?? profile.weight;
-  const weightGoal = Number.isFinite(initialWeight) && initialWeight >= 35 && initialWeight <= 300
-    ? `Yaklaşık ${fitnessLocale.format(Math.round(initialWeight * 0.95))} kg`
-    : 'Başlangıç kilonu gir';
-  const calories = fitnessCalorieEstimate(profile);
-  const steps = fitnessStepTarget(profile.baseline, 1);
-  const caloriesText = calories?.target ? `${fitnessLocale.format(calories.target)} kcal/gün` : 'Bilgilerini gir';
-  const calorieHint = calories?.target
-    ? `Tahmini koruma ${fitnessLocale.format(calories.maintenance)} kcal/gün. Başlangıç hedefi yaklaşık 300 kcal daha düşük.`
-    : calories ? 'Hesaplanan değer düşük kaldı. Kişisel bir hedef için diyetisyenle değerlendirebilirsin.'
-      : 'Yetişkin tahmini için yaş, formül seçimi ve hareket düzeyi gerekiyor.';
-  return `<div class="fitness-metrics">
-    <div><span>Beş aylık ilk kilo hedefi</span><strong>${weightGoal}</strong><small>Başlangıç kilosuna göre yaklaşık %5 kayıp. Hedefe varma süresi kişiden kişiye değişir.</small></div>
-    <div><span>Günlük kalori hedefi</span><strong>${caloriesText}</strong><small>${calorieHint}</small></div>
-    <div><span>İlk ay adım hedefi</span><strong>${steps ? `${fitnessLocale.format(steps)} adım/gün` : '7 gün ölç'} </strong><small>${steps ? 'Günlük sayı yerine haftalık ortalamayı takip et.' : 'Telefonundaki 7 günlük ortalamayı gir. Ağrı veya belirgin yorgunluk varsa artışı beklet.'}</small></div>
-  </div>`;
+function suggestedMovements(records, day) {
+  return ['Göğüs','Kol','Karın'].map(group=>{
+    const candidates=activityChoices.map(([name,,category],index)=>({name,category,index})).filter(item=>item.category===group);
+    const last=new Map();
+    for(const row of records){
+      if(row.day<=day && (!last.has(row.name) || row.day>last.get(row.name)))last.set(row.name,row.day);
+    }
+    return candidates.sort((a,b)=>(last.get(a.name)||'').localeCompare(last.get(b.name)||''))[0].index;
+  });
 }
 
-function fitnessProfileForm(profile) {
-  const activityOptions = Object.entries(fitnessActivityLevels).map(([value, entry]) =>
-    `<option value="${value}"${profile.activity === value ? ' selected' : ''}>${entry.label}</option>`).join('');
-  return `<form id="fitness-profile-form" class="fitness-form">
-    <div class="fitness-fields">
-      ${fitnessInput('Güncel kilo (kg)', 'weight', profile.weight, 'type="number" min="35" max="300" step="0.1" required')}
-      ${fitnessInput('Boy (cm)', 'height', profile.height, 'type="number" min="130" max="230" step="1" required')}
-      ${fitnessInput('Yaş', 'age', profile.age, 'type="number" min="19" max="78" step="1" placeholder="Kalori hesabı için"')}
-      ${field('Enerji formülü için cinsiyet', `<select name="sex"><option value="">Seç</option>
-        <option value="female"${profile.sex === 'female' ? ' selected' : ''}>Kadın</option><option value="male"${profile.sex === 'male' ? ' selected' : ''}>Erkek</option></select>`)}
-      ${field('Hareket düzeyi', `<select name="activity"><option value="">Seç</option>${activityOptions}</select>`)}
-      ${fitnessInput('7 günlük ortalama adım', 'baseline', profile.baseline || '', 'type="number" min="1" max="40000" step="1" placeholder="Henüz ölçmediysen boş bırak"')}
-    </div>
-    <div class="fitness-actions"><button type="submit" class="button primary">Hedefleri güncelle</button><span data-fitness-status="profile" role="status"></span></div>
-    <p class="row-meta">Kalori hesabı 19–78 yaş için Mifflin–St Jeor tahminidir. Gebelik, emzirme veya beslenmeyi etkileyen bir sağlık durumunda kişisel planı bir uzmana danış.</p>
-  </form>`;
+function activeCalories(met, weight, minutes) {
+  return (met - 1) * 3.5 * weight / 200 * minutes;
 }
 
-function fitnessMonthList(profile) {
-  return `<ol class="fitness-months">${fitnessMonths.map(([title, lifting, guidance], index) => {
-    const month = index + 1;
-    const steps = fitnessStepTarget(profile.baseline, month);
-    return `<li><span class="fitness-month-index">${month}. ay</span><div><strong>${title}</strong><p>${guidance}</p><small>${lifting}</small></div>
-      <span class="pill sport">${steps ? `${fitnessLocale.format(steps)} adım/gün` : 'Ortalamanı gir'}</span></li>`;
-  }).join('')}</ol>`;
+function sportWeight() {
+  const recent = Object.entries(fitnessData.logs ?? {}).filter(([day,row]) => day <= selectedDay && Number(row?.weight)>0)
+    .sort(([a],[b])=>b.localeCompare(a))[0];
+  return fitnessData.activityWeight ?? recent?.[1].weight ?? fitnessData.profile?.weight ?? '';
 }
 
-function fitnessGymPlan() {
-  return `<section class="panel fitness-panel">
-    ${panelHeading('Salon programı', 'Örnek hafta · Pazartesi A, Perşembe B. Üç gün uygunsa A/B/A ve B/A/B haftalarını sırayla uygula.')}
-    <div class="fitness-body">
-      <p>5–10 dakika hafif yürüyüş veya bisikletle ısın. İlk ay her hareket için 1–2 set yap. Setler arasında yaklaşık 1–2 dakika dinlen. Seti, düzgün formla 2–3 tekrar daha çıkarabileceğin noktada bitir.</p>
-      <div class="fitness-split">${Object.entries(fitnessWorkouts).map(([code, moves]) => `<article class="fitness-subpanel">
-        <div class="fitness-card-heading"><h3>Antrenman ${code}</h3><button type="button" class="button secondary" data-fitness-workout="${code}">Takvime ekle</button></div>
-        <ul class="fitness-exercises">${moves.map(([move, reps]) => `<li><strong>${move}</strong><span>${reps}</span></li>`).join('')}</ul>
-      </article>`).join('')}</div>
-      <p class="row-meta">Salon günleri arasında bir dinlenme günü bırak. Hareket sırasında keskin ağrı olursa egzersizi durdur ve formu eğitmenle kontrol et.</p>
-    </div>
-  </section>`;
+function durationText(minutes) {
+  const seconds = Math.round(minutes * 60);
+  const whole = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  if (!remainder) return whole + ' dk';
+  return (whole ? whole + ' dk ' : '') + remainder + ' sn';
 }
 
-function fitnessDormMeals() {
-  const meals = [
-    ['Kahvaltı', 'Yumurta veya sade yoğurt, tam tahıllı ekmek ya da yulaf, domates-salatalık veya bir meyve.'],
-    ['Öğle', 'Yemekhanede kuru fasulye, nohut, mercimek veya tavuk seç. Yanına sebze veya salata ve küçük bir porsiyon bulgur ekle.'],
-    ['Akşam', 'Izgara ya da fırın ana yemek ve sebze seç. Menü kızartma ağırlıklıysa çorba, yoğurt ve salatayı değerlendir, varsa baklagil veya yumurta ekle.'],
-    ['Antrenman çevresi', 'Acıkırsan önce muz ve sade yoğurt gibi kolay bir ara öğün seç. Sonrasında ana öğününde baklagil, yumurta, tavuk veya yoğurt bulunsun.'],
-    ['İçecek', 'Suyu gün içine yay. Salona matara götür ve yürüyüşte veya sıcakta ihtiyacına göre su iç. Şekersiz çay ve kahve de içecek seçenekleri arasında.'],
-    ['Yurt alışverişi', 'Yulaf, meyve, küçük paket tuzsuz kuruyemiş, tam tahıllı ekmek ve açılmamış tek porsiyon UHT süt. Soğutma imkânın varsa yoğurt, ayran ve haşlanmış yumurta.'],
-  ];
-  return `<section class="panel fitness-panel">
-    ${panelHeading('Yurtta beslenme', 'Öğünleri yemekhanenin menüsüne, bütçene ve antrenman saatine göre değiştir.')}
-    <div class="fitness-body">
-      <div class="fitness-meals">${meals.map(([title, text]) => `<article class="fitness-subpanel"><h3>${title}</h3><p>${text}</p></article>`).join('')}</div>
-      <p class="row-meta">Kalori takibi yapıyorsan bir haftalık gözlemle başla. Porsiyon, ekmek, sos, yağ ve içecekleri de kaydet. Yemekhane etiket veriyorsa yaklaşık tahmin yerine etiketi kullan.</p>
-    </div>
-  </section>`;
+function sports() {
+  const activities = Array.isArray(fitnessData.activities) ? fitnessData.activities : [];
+  const records = activities.filter(record => record && record.day === selectedDay && Number.isFinite(record.minutes) && Number.isFinite(record.kcal));
+  const kcal = records.reduce((sum,record)=>sum+record.kcal,0);
+  const minutes = records.reduce((sum,record)=>sum+record.minutes,0);
+  const past = (Array.isArray(fitnessData.lifting) ? fitnessData.lifting : []).filter(row=>row && row.day===selectedDay);
+  const suggestions = suggestedMovements(activities.filter(row=>row && typeof row.day==='string'), selectedDay);
+  return `${intro('Spor','',true)}
+    <section class="panel workout-simple">${panelHeading('Hareket kaydet')}
+    <div class="workout-inner"><details data-sports-programs ${programMenuOpen ? 'open' : ''}><summary>Hazır programlar · 3 günlük</summary><div class="workout-inner" data-ready-content>${readyProgramContent()}</div></details><div class="workout-picks" aria-label="Önerilen hareketler"><small>Seçili gün için öneriler</small>
+    ${suggestions.map(i=>`<button type="button" class="button secondary" data-pick-move="${i}">${activityChoices[i][0]}</button>`).join('')}</div>
+    <form id="activity-form"><div class="workout-fields">
+    ${field('Yaptığım hareket',`<select name="move">${movementOptions()}</select>`)}
+    <div class="workout-duration">${field('Süre','<input name="duration" type="number" min="1" max="600" step="1" placeholder="Örn. 12" required>')}${field('Birim','<select name="unit"><option value="minutes">Dakika</option><option value="seconds">Saniye</option></select>')}</div></div>
+    <label class="field" hidden data-custom-move>Hareket adı<input name="custom" maxlength="80"></label>
+    <details><summary>Kalori hesabı</summary>
+    ${field('Hesapta kullanılacak kilon (kg)',`<input name="weight" required type="number" min="30" max="350" step="0.1" value="${escapeText(sportWeight())}">`)}
+    <small>Süreye uzun molaları dahil etme. Aktif kalori tahmini, hareket türünün ortalama enerji harcamasından dinlenme payını çıkarır. <a href="https://pacompendium.com/conditioning-exercise/" target="_blank" rel="noopener">MET değerleri</a></small></details>
+    <button class="button primary">Günüme kaydet</button><small data-sports-feedback role="status"></small></form></div></section>
+    <section class="panel workout-simple">${panelHeading('Günün hareketleri',durationText(minutes)+' toplam',`<strong class="sport-energy">≈ ${Math.round(kcal)} aktif kcal</strong>`)}
+    <div class="workout-inner">${records.length ? records.map(row=>`<div class="workout-line"><div><strong>${escapeText(row.name)}</strong><small>${durationText(row.minutes)} · ≈ ${Math.round(row.kcal)} kcal</small></div><button type="button" class="button secondary" data-remove-activity="${escapeText(row.id)}">Kaldır</button></div>`).join('') : empty('Bu güne henüz hareket kaydetmedin.')}
+    ${past.length ? `<details><summary>Eski set kayıtları (${past.length})</summary><small>Süre bilgisi olmadığı için kalori toplamına eklenmedi.</small>${past.map(row=>`<p>${escapeText(row.move)} · ${Number(row.kg)} kg × ${Number(row.reps)}</p>`).join('')}</details>` : ''}</div></section>`;
 }
 
-function fitnessDailyLog() {
-  const day = selectedDay;
-  const logs = fitnessData.logs ?? {};
-  const entry = logs[day] ?? {};
-  return `<section class="panel fitness-panel">
-    ${panelHeading('Günlük takip', 'Spor ekranındaki seçili gün için kayıt gir. Eğilimi görmek için benzer koşullarda tartıl.')}
-    <form id="fitness-log-form" class="fitness-body fitness-form" data-day="${escapeText(day)}">
-      <div class="fitness-fields">
-        ${fitnessInput('Kilo (kg)', 'weight', entry.weight, 'type="number" min="35" max="300" step="0.1"')}
-        ${fitnessInput('Alınan kalori (kcal)', 'calories', entry.calories, 'type="number" min="1" max="10000" step="1"')}
-        ${fitnessInput('Adım sayısı', 'steps', entry.steps, 'type="number" min="0" max="50000" step="1"')}
-      </div>
-      <div class="fitness-actions"><button type="submit" class="button secondary">Günü kaydet</button><span data-fitness-status="log" role="status"></span></div>
-      <p id="fitness-log-summary" class="row-meta">${fitnessLogSummary(day)}</p>
-    </form>
-  </section>`;
+function updateActivityChoice(form) {
+  const custom = activityChoices[Number(form.elements.move.value)][2]==='Diğer';
+  form.querySelector('[data-custom-move]').hidden=!custom;
+  form.elements.custom.required=custom;
 }
 
-function fitnessLogSummary(day) {
-  const logs = fitnessData.logs ?? {};
-  const week = Object.entries(logs).filter(([date]) => date >= shiftDay(day, -6) && date <= day).map(([, entry]) => entry);
-  const weights = week.map(entry => entry.weight).filter(Number.isFinite);
-  const calories = week.map(entry => entry.calories).filter(Number.isFinite);
-  const steps = week.map(entry => entry.steps).filter(Number.isFinite);
-  const average = numbers => fitnessLocale.format(numbers.reduce((sum, number) => sum + number, 0) / numbers.length);
-  const parts = [];
-  if (weights.length) parts.push(`Kilo ortalaması ${average(weights)} kg (${weights.length} ölçüm)`);
-  if (calories.length) parts.push(`Alınan kalori ortalaması ${average(calories)} kcal (${calories.length} gün)`);
-  if (steps.length) parts.push(`Adım ortalaması ${average(steps)} (${steps.length} gün)`);
-  return parts.length ? `Son 7 gün · ${parts.join(' · ')}` : 'Son 7 güne kayıt girdikçe ortalamaların burada görünür.';
-}
-
-function fitnessPlan() {
-  const profile = fitnessData.profile ?? {};
-  return `<div class="fitness-area">
-    <section class="panel fitness-panel">
-      ${panelHeading('5 aylık kilo ve antrenman planı', 'Yurt yemekleri, yürüyüş ve salon programı bir arada. Kilo ve boy bilgilerin bu tarayıcıda saklanır.')}
-      <div class="fitness-body">
-        <div id="fitness-targets">${fitnessTargets(profile)}</div>
-        ${fitnessProfileForm(profile)}
-      </div>
-    </section>
-    <section class="panel fitness-panel">
-      ${panelHeading('Aylık yol haritası', 'Adım artışlarını toparlanmana göre uygula. Salonda ve yürüyüşte zorlandığında bir önceki seviyede kal.')}
-      <div id="fitness-months" class="fitness-body">${fitnessMonthList(profile)}</div>
-    </section>
-    ${fitnessGymPlan()}
-    ${fitnessDormMeals()}
-    ${fitnessDailyLog()}
-    <p class="row-meta fitness-sources">Sağlık ve antrenman kaynakları ·
-      <a href="https://www.niddk.nih.gov/health-information/weight-management/choosing-a-safe-successful-weight-loss-program" target="_blank" rel="noopener noreferrer">NIDDK kilo hedefi</a> ·
-      <a href="https://pubmed.ncbi.nlm.nih.gov/2305711/" target="_blank" rel="noopener noreferrer">Enerji formülü</a> ·
-      <a href="https://www.cdc.gov/physical-activity-basics/guidelines/adults.html" target="_blank" rel="noopener noreferrer">CDC hareket</a> ·
-      <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC12965823/" target="_blank" rel="noopener noreferrer">ACSM kuvvet çalışması</a> ·
-      <a href="https://pubmed.ncbi.nlm.nih.gov/40713949/" target="_blank" rel="noopener noreferrer">Adım araştırması</a> ·
-      <a href="https://hsgm.saglik.gov.tr/depo/birimler/saglikli-beslenme-ve-hareketli-hayat-db/Dokumanlar/Rehberler/Turkiye_Beslenme_Rehber_TUBER_2022_min.pdf" target="_blank" rel="noopener noreferrer">Türkiye Beslenme Rehberi</a>
-    </p>
-  </div>`;
-}
-
-function persistFitnessData(status) {
+function persistSports(patch) {
+  let update;
   try {
-    localStorage.setItem(fitnessStorageKey, JSON.stringify(fitnessData));
-    status.textContent = 'Bu tarayıcıya kaydedildi.';
+    const raw = localStorage.getItem(fitnessStorageKey);
+    const stored = raw ? JSON.parse(raw) : {};
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) throw new Error('Invalid sports data');
+    const changes = typeof patch === 'function' ? patch(stored) : patch;
+    update = {...stored, ...changes};
+    localStorage.setItem(fitnessStorageKey, JSON.stringify(update));
   } catch {
-    status.textContent = 'Bu oturumda güncellendi. Tarayıcıya kalıcı kayıt yapılamadı.';
+    const feedback = document.querySelector('[data-sports-feedback]');
+    if (feedback) feedback.textContent = 'Kaydedilemedi. Tarayıcı depolama alanını kontrol edip tekrar dene.';
+    return false;
   }
+  Object.assign(fitnessData, update);
+  return true;
 }
 
-document.addEventListener('submit', event => {
-  const form = event.target;
-  if (form.id !== 'fitness-profile-form' && form.id !== 'fitness-log-form') return;
+function storeActivities(change, weight) {
+  const saved = persistSports(stored => {
+    const activities = stored.activities ?? [];
+    if (!Array.isArray(activities)) throw new Error('Invalid activity history');
+    const patch = {activities: change(activities)};
+    if (weight !== undefined) patch.activityWeight = weight;
+    return patch;
+  });
+  if (saved) render();
+}
+
+document.addEventListener('click', event=>{
+  const pick=event.target.closest('[data-pick-move]');
+  if(pick){
+    const form=document.querySelector('#activity-form');
+    form.elements.move.value=pick.dataset.pickMove;
+    updateActivityChoice(form);
+    form.elements.duration.focus();
+  }
+  const remove=event.target.closest('[data-remove-activity]');
+  if(remove)storeActivities(rows=>rows.filter(r=>r?.id!==remove.dataset.removeActivity));
+});
+document.addEventListener('change',event=>{
+  if(event.target.matches('#activity-form [name="move"]'))updateActivityChoice(event.target.form);
+  if(event.target.matches('#activity-form [name="unit"]')){
+    event.target.form.elements.duration.max=event.target.value==='seconds' ? '36000' : '600';
+  }
+});
+document.addEventListener('submit',event=>{
+  if(event.target.id!=='activity-form')return;
   event.preventDefault();
-  const data = new FormData(form);
-  const number = name => data.get(name) === '' ? null : Number(data.get(name));
-  if (form.id === 'fitness-profile-form') {
-    const weight = number('weight');
-    const profile = {
-      weight, initialWeight: fitnessData.profile?.initialWeight ?? fitnessData.profile?.weight ?? weight,
-      height: number('height'), age: number('age'),
-      sex: data.get('sex'), activity: data.get('activity'), baseline: number('baseline'),
-    };
-    fitnessData.profile = profile;
-    document.querySelector('#fitness-targets').innerHTML = fitnessTargets(profile);
-    document.querySelector('#fitness-months').innerHTML = fitnessMonthList(profile);
-    persistFitnessData(form.querySelector('[data-fitness-status="profile"]'));
+  const form=event.target;
+  if(!form.reportValidity())return;
+  const data=new FormData(form);
+  const index=Number(data.get('move'));
+  const [label,met]=activityChoices[index];
+  const name=activityChoices[index][2]==='Diğer' ? data.get('custom').trim() : label;
+  if(!name){
+    form.elements.custom.value='';
+    form.elements.custom.reportValidity();
     return;
   }
-  const entry = { weight: number('weight'), calories: number('calories'), steps: number('steps') };
-  fitnessData.logs ??= {};
-  fitnessData.logs[form.dataset.day] = entry;
-  persistFitnessData(form.querySelector('[data-fitness-status="log"]'));
-  document.querySelector('#fitness-log-summary').textContent = fitnessLogSummary(form.dataset.day);
+  const minutes=Number(data.get('duration')) / (data.get('unit') === 'seconds' ? 60 : 1), weight=Number(data.get('weight'));
+  if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 600 || !Number.isFinite(weight) || weight < 30 || weight > 350) return;
+  const record={id:newId(),day:selectedDay,name,minutes,weight,met,kcal:activeCalories(met,weight,minutes)};
+  storeActivities(rows=>[...rows,record],weight);
 });
+const readyPrograms = [
+  {name:'Salona başlangıç', sets:2, days:[
+    ['Leg press','Göğüs press','Oturarak kablo çekiş','Dead bug'],
+    ['Vücut ağırlığıyla squat','Lat pulldown','Eğimli şınav','Bird dog'],
+    ['Glute bridge','Göğüs press','Dambıl biceps curl','Diz destekli yan plank']]},
+  {name:'Göğüs, kol ve karın', sets:2, days:[
+    ['Göğüs press','Oturarak kablo çekiş','Leg press','İple triceps itiş','Dead bug'],
+    ['Goblet squat','Lat pulldown','Eğimli şınav','Hammer curl','Pallof press'],
+    ['Eğimli dambıl press','Göğüs destekli row','Leg curl','Dambıl biceps curl','Kabloda crunch']]},
+  {name:'Makine ve kablo', sets:2, days:[
+    ['Leg press','Göğüs press','Lat pulldown','Pallof press'],
+    ['Leg curl','Oturarak kablo çekiş','Makinede omuz press','Kabloda biceps curl'],
+    ['Leg press','Pec deck','Face pull','İple triceps itiş','Kabloda crunch']]},
+  {name:'Dambıl ve sehpa', sets:2, days:[
+    ['Goblet squat','Dambıl bench press','Göğüs destekli row','Dead bug'],
+    ['Glute bridge','Eğimli dambıl press','Hammer curl','Bird dog'],
+    ['Goblet squat','Göğüs destekli row','Dambıl yana açış','Dambıl biceps curl','Diz destekli yan plank']]},
+  {name:'Ekipmansız antrenman', sets:2, days:[
+    ['Vücut ağırlığıyla squat','Eğimli şınav','Dead bug'],
+    ['Glute bridge','Bird dog','Diz destekli yan plank'],
+    ['Eğimli şınav','Ayakta baldır yükseltme','Vücut ağırlığıyla squat','Ters mekik (reverse crunch)']]},
+  {name:'Sınav haftası · kısa seanslar', sets:1, days:[
+    ['Leg press','Göğüs press','Oturarak kablo çekiş'],
+    ['Goblet squat','Lat pulldown','Dead bug'],
+    ['Glute bridge','Eğimli şınav','Hammer curl','Diz destekli yan plank']]}
+];
+const previousProgram = readyPrograms.findIndex(program => program.name === fitnessData.readySelection?.program);
+let readyProgramIndex = previousProgram >= 0 ? previousProgram : 1;
+let readyDayIndex = previousProgram >= 0 && [0,1,2].includes(fitnessData.readySelection?.day) ? fitnessData.readySelection.day : 0;
+let programMenuOpen = false;
+document.addEventListener('toggle', event => {
+  if (event.target.matches('[data-sports-programs]')) programMenuOpen = event.target.open;
+}, true);
 
-document.addEventListener('click', event => {
-  const button = event.target.closest('[data-fitness-workout]');
-  if (!button) return;
-  openEditor('add-workout');
-  const workoutForm = document.querySelector('#editor-form');
-  workoutForm.elements.namedItem('title').value = `Salon · Antrenman ${button.dataset.fitnessWorkout}`;
-  workoutForm.elements.namedItem('place').value = 'Spor salonu';
-  workoutForm.elements.namedItem('minutes').value = '45';
+function movementDose(name,sets) {
+  if(name==='Diz destekli yan plank')return sets+' × 15–20 sn / taraf';
+  if(['Dead bug','Bird dog','Pallof press'].includes(name))return sets+' × 6–8 tekrar / taraf';
+  return sets+' × 8–12 tekrar';
+}
+function readyProgramContent() {
+  const program=readyPrograms[readyProgramIndex];
+  const moves=program.days[readyDayIndex];
+  return `<div class="workout-fields">${field('Program',`<select data-ready-program>${readyPrograms.map((p,i)=>`<option value="${i}" ${i===readyProgramIndex?'selected':''}>${p.name}</option>`).join('')}</select>`)}
+    ${field('Antrenman günü',`<select data-ready-day>${[0,1,2].map(i=>`<option value="${i}" ${i===readyDayIndex?'selected':''}>${i+1}. gün</option>`).join('')}</select>`)}</div>
+    <small>Günler arasına bir dinlenme günü koyabilirsin. Hareketi seçip yaptığın süreyi kaydet.</small>
+    ${moves.map(name=>{
+      const id=activityChoices.findIndex(([label])=>label===name);
+      return `<div class="workout-line"><button type="button" class="button secondary" data-pick-move="${id}">${name}</button><small>${movementDose(name,program.sets)}</small></div>`;
+    }).join('')}`;
+}
+document.addEventListener('change',event=>{
+  const input=event.target;
+  if(!input.matches('[data-ready-program],[data-ready-day]'))return;
+  if(input.matches('[data-ready-program]')){
+    readyProgramIndex=Number(input.value);
+    readyDayIndex=0;
+  } else readyDayIndex=Number(input.value);
+  persistSports({readySelection: {program: readyPrograms[readyProgramIndex].name, day: readyDayIndex}});
+  const container=input.closest('[data-ready-content]');
+  const selector=input.matches('[data-ready-program]')?'[data-ready-program]':'[data-ready-day]';
+  container.innerHTML=readyProgramContent();
+  container.querySelector(selector).focus();
 });

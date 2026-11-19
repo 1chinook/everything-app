@@ -76,7 +76,7 @@
 .discover-filter[aria-pressed="true"], .discover-save[aria-pressed="true"] {
   border-color: var(--accent);
   color: var(--accent);
-  background: #292342;
+  background: #eaf0ff;
 }
 
 .discover-card {
@@ -93,7 +93,7 @@
 }
 
 .discover-type-news {
-  color: #ffbba1;
+  color: #b74a25;
 }
 
 .discover-type-study {
@@ -107,7 +107,7 @@
 
 .discover-note {
   margin-bottom: .25rem;
-  color: #d4d0e4;
+  color: #49566c;
   font-size: .875rem;
   line-height: 1.5;
 }

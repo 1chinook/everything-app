@@ -6,6 +6,15 @@ const { createHash, randomBytes } = require('node:crypto');
 
 const spotifyRedirect = 'http://127.0.0.1:4173/api/music/callback';
 const turkeyDay = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Istanbul', dateStyle: 'short' });
+const discoveryVersion = 3;
+
+function trackKeys(track) {
+  const title = (track.name ?? '').replace(/\([^)]*(?:live|remaster|acoustic|version|mix)[^)]*\)/gi, '')
+    .replace(/\s[-–]\s.*(?:live|remaster|acoustic|version|mix).*/gi, '')
+    .normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  return [track.id && 'id:' + track.id, track.linked_from?.id && 'id:' + track.linked_from.id,
+    track.external_ids?.isrc && 'isrc:' + track.external_ids.isrc, title && 'title:' + title].filter(Boolean);
+}
 
 function readJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
@@ -23,6 +32,7 @@ function createSpotifyMusic(directory, { clientId = spotifyClientId(), request =
   let authorization;
   let operation;
   let retryAfter = 0;
+  let quotaUntil = 0;
   let message = '';
 
   function store(next) {
@@ -64,7 +74,7 @@ function createSpotifyMusic(directory, { clientId = spotifyClientId(), request =
         redirect_uri: spotifyRedirect, code_verifier: verifier });
       if (!data.refresh_token) return false;
       if (operation) await operation;
-      store({ refreshToken: data.refresh_token, seen: [] });
+      store({ ...state, refreshToken: data.refresh_token, day: undefined });
       message = '';
       retryAfter = 0;
       void refresh(data.access_token);
@@ -74,16 +84,21 @@ function createSpotifyMusic(directory, { clientId = spotifyClientId(), request =
     }
   }
 
-  async function get(access, endpoint) {
+  async function get(access, endpoint, optional = false) {
     const response = await request('https://api.spotify.com/v1/' + endpoint, {
       headers: { Authorization: 'Bearer ' + access }, signal: AbortSignal.timeout(6000),
     });
-    return response.ok ? response.json() : null;
+    if (!response.ok) {
+      if (optional && [403,404].includes(response.status)) return null;
+      const delay = Number(response.headers?.get('retry-after'));
+      throw Object.assign(new Error('spotify_request'), { retryMs: response.status === 429 ? (Number.isFinite(delay) && delay > 0 ? delay * 1000 : 3600000) : 0 });
+    }
+    return response.json();
   }
 
   async function refresh(accessToken) {
     const day = turkeyDay.format(now());
-    if (!configured || !state.refreshToken || state.day === day || now() < retryAfter) return;
+    if (!configured || !state.refreshToken || (state.day === day && state.discoveryVersion === discoveryVersion) || now() < Math.max(retryAfter,quotaUntil)) return;
     if (operation) return operation;
     operation = (async () => {
       try {
@@ -93,30 +108,64 @@ function createSpotifyMusic(directory, { clientId = spotifyClientId(), request =
           access = data.access_token;
           if (data.refresh_token) store({ ...state, refreshToken: data.refresh_token });
         }
+        const ranges = ['short_term','medium_term','long_term'];
         const [artists, top, recent] = await Promise.all([
-          get(access, 'me/top/artists?time_range=short_term&limit=10'),
-          get(access, 'me/top/tracks?time_range=short_term&limit=30'),
-          get(access, 'me/player/recently-played?limit=30'),
+          Promise.all(ranges.map(range => get(access, 'me/top/artists?time_range=' + range + '&limit=50'))),
+          Promise.all(ranges.map(range => get(access, 'me/top/tracks?time_range=' + range + '&limit=50'))),
+          get(access, 'me/player/recently-played?limit=50'),
         ]);
-        const seeds = [...new Map([...(artists?.items ?? []), ...(recent?.items ?? []).flatMap(item => item.track?.artists ?? [])]
-          .filter(artist => artist?.id && artist.name).map(artist => [artist.id, artist])).values()];
-        const heard = new Set([...(top?.items ?? []).map(track => track.id), ...(recent?.items ?? []).map(item => item.track?.id), ...(state.seen ?? [])]);
-        const offset = Math.floor(now() / 86400000) % (seeds.length || 1);
-        const candidates = [...seeds.slice(offset), ...seeds.slice(0, offset)].slice(0, 4);
-        for (const artist of candidates) {
-          const query = new URLSearchParams({ q: 'artist:' + artist.name, type: 'track', limit: '10', market: 'TR' });
+        if (artists.some(result => !Array.isArray(result.items)) || top.some(result => !Array.isArray(result.items)) || !Array.isArray(recent.items)) throw new Error('spotify_history');
+        const artistItems = artists.flatMap(result => result.items);
+        const tracks = [...top.flatMap(result => result.items), ...recent.items.map(item => item.track).filter(Boolean)];
+        const known = new Set([...(state.known ?? []), ...tracks.flatMap(trackKeys)]);
+        const recentCounts = new Map();
+        for (const item of recent.items) for (const key of trackKeys(item.track ?? {})) recentCounts.set(key,(recentCounts.get(key) ?? 0)+1);
+        const frequent = new Set(top.flatMap((result,index) => result.items.slice(0,index===0?20:10).flatMap(trackKeys)));
+        for (const [key,count] of recentCounts) if(count>=3) frequent.add(key);
+        const recommendedKeys = new Set([...(state.recommendedKeys ?? []),...(state.seen ?? []).map(id=>'id:'+id)]);
+        if(state.pick) for(const key of trackKeys({id:state.pick.id,name:state.pick.title})) recommendedKeys.add(key);
+        const knownArtists = new Set([...(state.knownArtists ?? []), ...artistItems.map(a => a.id), ...tracks.flatMap(t => t.artists ?? []).map(a => a.id)].filter(Boolean));
+        const genres = state.genres?.length ? state.genres : [...new Set(artistItems.flatMap(a => a.genres ?? []))].slice(0,8);
+        const seeds = [...new Map(artistItems.filter(a=>a.id&&a.name).map(a=>[a.id,a])).values()];
+        if (!genres.length && !seeds.length) {
+          store({ ...state, known:[...known], knownArtists:[...knownArtists] });
+          message = 'Spotify sanatçı veya tür bilgisi sağlamadı. Keşif türlerini aşağıdan seçebilirsin.';
+          return;
+        }
+        const dayNumber = Math.floor(now()/86400000);
+        const artistOffset = dayNumber % (seeds.length || 1);
+        const genreOffset = dayNumber % (genres.length || 1);
+        const artistSearches = [...seeds.slice(artistOffset),...seeds.slice(0,artistOffset)].slice(0,3)
+          .map(artist=>({mode:'artist',label:artist.name,artistId:artist.id,query:'artist:"'+artist.name.replace(/["\\]/g,'')+'"',offset:10+(dayNumber%3)*10}));
+        const genreSearches = [...genres.slice(genreOffset),...genres.slice(0,genreOffset)].slice(0,3)
+          .map(genre=>({mode:'genre',label:genre,query:'genre:"'+genre.replace(/["\\]/g,'')+'"',offset:(dayNumber%8)*10}));
+        const searches = state.lastDiscoveryMode==='artist' ? [...genreSearches,...artistSearches] : [...artistSearches,...genreSearches];
+        for (const search of searches) {
+          const query = new URLSearchParams({ q:search.query, type:'track', limit:'10', offset:String(search.offset), market:'TR' });
           const results = await get(access, 'search?' + query);
-          const pick = results?.tracks?.items.find(track => track.id && !heard.has(track.id) &&
-            track.artists?.some(item => item.id === artist.id) &&
+          const candidates = (results?.tracks?.items ?? []).filter(track => track.id && !track.is_local && track.is_playable !== false &&
+            !trackKeys(track).some(key => frequent.has(key) || recommendedKeys.has(key)) && track.artists?.length &&
+            (search.mode!=='artist' || track.artists.some(a=>a.id===search.artistId)) &&
             /^https:\/\/open\.spotify\.com\/track\/[A-Za-z0-9]+$/.test(track.external_urls?.spotify ?? ''));
+          const score = track => (trackKeys(track).some(key=>known.has(key))?2:0) +
+            (trackKeys(track).some(key=>recentCounts.has(key))?1:0) +
+            (search.mode==='genre' && track.artists.every(a=>knownArtists.has(a.id))?2:0) +
+            (track.artists.some(a=>(state.recommendedArtists ?? []).slice(-6).includes(a.id))?1:0);
+          const bestScore = Math.min(...candidates.map(score));
+          const preferred = candidates.filter(track=>score(track)===bestScore);
+          const pick = preferred[Math.floor(Math.random()*preferred.length)];
           if (!pick) continue;
-          store({ refreshToken: state.refreshToken, day, pick: {
-            title: pick.name, artist: pick.artists.map(item => item.name).join(', '), url: pick.external_urls.spotify,
-          }, seen: [...(state.seen ?? []), pick.id].slice(-60) });
+          store({ ...state, day, discoveryVersion, pick: {
+            id:pick.id, title: pick.name, artist: pick.artists.map(item => item.name).join(', '), url: pick.external_urls.spotify,
+            reason:search.mode==='artist' ? 'Sevdiğin sanatçıdan farklı bir parça' : search.label+' tarzında keşif',
+          }, seen: [...new Set([...(state.seen ?? []),pick.id])], known:[...new Set([...known,...trackKeys(pick)])],
+            knownArtists:[...knownArtists], recommendedKeys:[...new Set([...recommendedKeys,...trackKeys(pick)])], lastDiscoveryMode:search.mode,
+            recommendedArtists:[...(state.recommendedArtists ?? []),...pick.artists.map(a=>a.id)].slice(-40) });
           message = '';
           return;
         }
-        message = 'Spotify bugün uygun yeni bir parça döndürmedi. Bir süre sonra tekrar denenecek.';
+        store({ ...state, known:[...known], knownArtists:[...knownArtists] });
+        message = 'Sık dinlediklerini ve önceki önerileri eleyince uygun parça kalmadı. Keşif türlerini genişletebilirsin.';
       } catch (error) {
         if (error.spotifyCode === 'invalid_grant') {
           const expired = { ...state, refreshToken: undefined };
@@ -124,9 +173,10 @@ function createSpotifyMusic(directory, { clientId = spotifyClientId(), request =
           message = 'Spotify iznini yeniden vermen gerekiyor.';
         } else {
           message = 'Spotify yanıt vermedi. Uygulama daha sonra tekrar deneyecek.';
+          quotaUntil = Math.max(quotaUntil,now()+(error.retryMs ?? 0));
         }
       } finally {
-        retryAfter = now() + 30 * 60000;
+        retryAfter = Math.max(retryAfter,now() + 30 * 60000);
       }
     })();
     try { await operation; } finally { operation = undefined; }
@@ -134,10 +184,21 @@ function createSpotifyMusic(directory, { clientId = spotifyClientId(), request =
 
   function current() {
     return { configured, connected: Boolean(configured && state.refreshToken),
-      track: state.day === turkeyDay.format(now()) ? state.pick : undefined, message };
+      track: state.day === turkeyDay.format(now()) && state.discoveryVersion === discoveryVersion ? state.pick : undefined,
+      genres: state.genres ?? [], message };
   }
 
-  return { connect, callback, refresh, current };
+  async function discover({ rejectId, genres } = {}) {
+    if (operation) await operation;
+    if (genres !== undefined && (!Array.isArray(genres) || genres.length > 8 || genres.some(g => typeof g !== 'string' || !g.trim() || g.length > 60))) throw Object.assign(new Error('Invalid genres'),{status:400});
+    if (rejectId && state.pick?.id !== rejectId) return current();
+    store({ ...state, ...(genres !== undefined ? {genres:genres.map(g=>g.trim())} : {}), day:undefined });
+    retryAfter=0;
+    await refresh();
+    return current();
+  }
+
+  return { connect, callback, refresh, current, discover };
 }
 
 module.exports = { createSpotifyMusic };

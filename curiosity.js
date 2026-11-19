@@ -1,25 +1,11 @@
 const curiosityKey = 'everything-app-curiosity-v1';
-const curiositySeeds = [
-  ['Matematik', 'Sonsuzlukların büyüklükleri neden farklı?', 'Cantor teoremi'],
-  ['Bilgisayar', 'Bir bilgisayar rastgele sayı üretebilir mi?', 'Rastgele sayı üreteci'],
-  ['Tarih', 'Antik İskenderiye Kütüphanesi nasıl bir yerdi?', 'İskenderiye Kütüphanesi'],
-  ['Sanat', 'Bir resimde perspektif nasıl kurulur?', 'Perspektif'],
-  ['Doğa', 'Mantarlar bitkilerle nasıl ilişki kurar?', 'Mikoriza'],
-  ['Uzay', 'Bir yıldızın uzaklığı nasıl ölçülür?', 'Paralaks'],
-  ['Müzik', 'Aynı nota farklı çalgılarda neden farklı duyulur?', 'Tını'],
-  ['Dil', 'Diller birbirinden nasıl kelime alır?', 'Ödünçleme'],
-  ['Felsefe', 'Bir düşünce deneyi bize ne öğretebilir?', 'Düşünce deneyi'],
-  ['Mühendislik', 'Asma köprüler yükü nasıl taşır?', 'Asma köprü'],
-  ['Matematik', 'Bir yüzeyin tek tarafı olabilir mi?', 'Möbius şeridi'],
-  ['Bilgisayar', 'Bir algoritmanın çözemeyeceği sorular var mı?', 'Durma problemi'],
-  ['Kültür', 'Takvimler neden birbirinden farklı?', 'Takvim'],
-  ['Okyanus', 'Okyanusun dibinde güneşsiz yaşam nasıl olur?', 'Hidrotermal baca'],
-];
 let curiosityTab = 'daily';
 let curiosityMessage = '';
 let curiosityLinks = [];
 let curiosityLoading = false;
 let curiosityRequest = 0;
+let discoveryBusy = false;
+let discoveryRetry = 0;
 
 function readCuriosity() {
   try {
@@ -48,15 +34,13 @@ function curiosityDay() {
 }
 
 function curiosityPick() {
-  if (curiosityData.daily?.day === curiosityDay()) return curiosityData.daily;
+  if (curiosityData.daily) return curiosityData.daily;
   const pending = curiosityData.questions.filter(q => !q.done);
   if (pending.length) {
     const question = pending[0];
     return { day: curiosityDay(), title: question.title, topic: question.topic || question.title, category: 'Merak kuyruğundan', questionId: question.id };
   }
-  const dayNumber = Math.floor(Date.parse(curiosityDay()) / 86400000);
-  const [category, title, topic] = curiositySeeds[dayNumber % curiositySeeds.length];
-  return { day: curiosityDay(), title, topic, category };
+  return { day: curiosityDay(), title:'Bugünün konusu hazırlanıyor', topic:'', category:'Wikipedia keşfi' };
 }
 
 function wikiSearch(topic) {
@@ -69,13 +53,13 @@ function wikiArticle(title, language = 'tr') {
 
 function curiosityDaily() {
   const pick = curiosityPick();
-  if (curiosityData.daily?.day !== pick.day) keepCuriosity({...curiosityData, daily:pick});
   return `<p class="row-meta">${escapeText(pick.category)} · ${escapeText(pick.day)}</p>
     <h3>${escapeText(pick.title)}</h3>
+    ${pick.extract ? `<p class="books-prose">${escapeText(pick.extract)}</p><p class="row-meta">Wikipedia · CC BY-SA · <a href="${wikiArticle(pick.topic,pick.language)}" target="_blank" rel="noopener noreferrer">Makale ve yazar geçmişi</a></p>`:''}
+    ${discoveryBusy ? '<p class="row-meta">Yeni bir makale aranıyor…</p>' : ''}
     <p class="row-meta">Okurken bir yeni bilgi, bir bağlantı ve aklına gelen bir soru not al.</p>
-    <div class="sync-actions"><a class="button secondary" href="${wikiSearch(pick.topic)}" target="_blank" rel="noopener noreferrer">Wikipedia’da araştır</a>
-    <button class="button primary" data-curiosity="start-daily">Okuma rotası başlat</button>
-    <button class="button secondary" data-curiosity="shuffle">Başka konu seç</button>
+    <div class="sync-actions">${pick.topic ? `<a class="button secondary" href="${pick.article?wikiArticle(pick.topic,pick.language):wikiSearch(pick.topic)}" target="_blank" rel="noopener noreferrer">Wikipedia’da araştır</a><button class="button primary" data-curiosity="start-daily">Okuma rotası başlat</button>`:''}
+    <button class="button secondary" data-curiosity="shuffle" ${discoveryBusy?'disabled':''}>${curiosityData.daily?'Başka konu seç':'Yeniden dene'}</button>
     ${pick.questionId ? `<button class="button secondary" data-curiosity="complete-daily">Araştırdım</button>` : ''}</div>`;
 }
 
@@ -122,6 +106,46 @@ function refreshCuriosity() {
   const panel = document.querySelector('#curiosity-panel');
   if (panel) panel.outerHTML = curiosityPanel();
 }
+
+async function refreshDailyDiscovery(force = false) {
+  if (!document.querySelector('#curiosity-panel') || discoveryBusy) return;
+  if (!force && ((curiosityData.daily?.article && curiosityData.daily.day===curiosityDay()) || Date.now()<discoveryRetry)) return;
+  discoveryBusy=true;
+  curiosityMessage='';
+  refreshCuriosity();
+  try {
+    const seen=new Set(curiosityData.seen ?? []);
+    if(curiosityData.daily?.topic) seen.add('tr:'+curiosityData.daily.topic);
+    const categories=['Matematik','Bilgisayar bilimi','Matematik','Bilgisayar bilimi','Tarih','Sanat','Doğa','Kültür'];
+    const category=categories[seen.size%categories.length];
+    let selected;
+    for(let attempt=0;attempt<3 && !selected;attempt++) {
+      const parameters={action:'query',format:'json',origin:'*',prop:'extracts|pageprops',exintro:'1',explaintext:'1',exchars:'700',exlimit:'20',ppprop:'disambiguation'};
+      if(attempt===0) Object.assign(parameters,{generator:'search',gsrsearch:'incategory:"'+category+'"',gsrnamespace:'0',gsrlimit:'15',gsroffset:String((seen.size%100)*10)});
+      else Object.assign(parameters,{generator:'random',grnnamespace:'0',grnlimit:'15'});
+      const query=new URLSearchParams(parameters);
+      const response=await fetch('https://tr.wikipedia.org/w/api.php?'+query,{signal:AbortSignal.timeout(10000)});
+      if(!response.ok) throw new Error('Wikipedia unavailable');
+      const data=await response.json();
+      if(data.error) throw new Error('Wikipedia query failed');
+      const latest=readCuriosity();
+      for(const key of latest.seen ?? []) seen.add(key);
+      const candidates=Object.values(data.query?.pages ?? {}).filter(page=>page.pageid>0 && page.title && !seen.has('tr:'+page.title) && page.extract?.length>100 && !Object.hasOwn(page.pageprops ?? {},'disambiguation'));
+      selected=candidates[Math.floor(Math.random()*candidates.length)];
+    }
+    if(!selected) throw new Error('No unseen article');
+    seen.add('tr:'+selected.title);
+    const daily={day:curiosityDay(),title:selected.title,topic:selected.title,category:'Wikipedia · Yeni keşif',language:'tr',article:true,extract:selected.extract};
+    if(keepCuriosity({...curiosityData,seen:[...seen],daily})) curiosityMessage='Günlük keşfin güncellendi. Gösterilen makaleler tekrar seçilmez.';
+    discoveryRetry=Date.now()+60000;
+  } catch {
+    curiosityMessage=curiosityData.daily?'Yeni makale alınamadı. Son keşfin burada duruyor. Yeniden deneyebilirsin.':'Wikipedia’ya ulaşılamadı. Bağlantını kontrol edip yeniden dene.';
+    discoveryRetry=Date.now()+60000;
+  } finally {discoveryBusy=false;refreshCuriosity();}
+}
+
+window.addEventListener('focus',()=>{void refreshDailyDiscovery();});
+setInterval(()=>{void refreshDailyDiscovery();},60000);
 
 function startCuriosityRoute(title, language = 'tr') {
   const route = { id: crypto.randomUUID(), title, language, steps: [{title, read: false, note: ''}] };
@@ -189,11 +213,10 @@ document.addEventListener('click', event => {
   const id = button.dataset.id;
   const pick = curiosityPick();
   if (action === 'shuffle') {
-    const choices = curiositySeeds.filter(seed => seed[1] !== pick.title);
-    const [category, title, topic] = choices[Math.floor(Math.random() * choices.length)];
-    keepCuriosity({...curiosityData, daily:{day:curiosityDay(), category, title, topic}});
+    void refreshDailyDiscovery(true);
+    return;
   }
-  if (action === 'start-daily') startCuriosityRoute(pick.topic);
+  if (action === 'start-daily' && pick.topic) startCuriosityRoute(pick.topic,pick.language ?? 'tr');
   if (action === 'question-route') {
     const q = curiosityData.questions.find(q => q.id === id);
     if (q) startCuriosityRoute(q.topic || q.title);

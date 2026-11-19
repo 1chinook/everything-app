@@ -10,6 +10,11 @@ const { createNewsReader } = require('./news.js');
 const { createSpotifyMusic } = require('./spotify-music.js');
 
 const assets = new Map([
+  ['/app-icon-192.png', ['app-icon-192.png', 'image/png']],
+  ['/app-icon-512.png', ['app-icon-512.png', 'image/png']],
+  ['/sw.js', ['sw.js', 'text/javascript']],
+  ['/manifest.webmanifest', ['manifest.webmanifest', 'application/manifest+json']],
+  ['/app-icon.svg', ['app-icon.svg', 'image/svg+xml']],
   ['/', ['index.html', 'text/html']],
   ['/index.html', ['index.html', 'text/html']],
   ['/styles.css', ['styles.css', 'text/css']],
@@ -77,6 +82,19 @@ function createPlannerServer(directory, code) {
   const server = http.createServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     const pathname = request.url?.split('?', 1)[0];
+    if (pathname === '/api/music/discover' && request.method === 'POST') {
+      const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.remoteAddress);
+      const host = /^(?:127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(request.headers.host ?? '');
+      const origin = request.headers.origin;
+      if (!loopback || !host || (origin && origin !== 'http://' + request.headers.host)) { sendJson(response,403,{error:'local'}); return; }
+      if (!request.headers['content-type']?.startsWith('application/json')) {sendJson(response,415,{error:'json'});return;}
+      try {
+        const body = await readBody(request);
+        if (!body || typeof body !== 'object' || (body.rejectId !== undefined && (typeof body.rejectId !== 'string' || !/^[A-Za-z0-9]+$/.test(body.rejectId)))) {sendJson(response,400,{error:'input'});return;}
+        sendJson(response,200,await music.discover({rejectId:body.rejectId,genres:body.genres}));
+      } catch(error) {sendJson(response,error.status ?? 500,{error:'music'});}
+      return;
+    }
     if (['/api/music', '/api/music/connect', '/api/music/callback'].includes(pathname) && request.method === 'GET') {
       const loopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.socket.remoteAddress);
       const host = /^(?:127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(request.headers.host ?? '');
@@ -98,11 +116,7 @@ function createPlannerServer(directory, code) {
       }
       void music.refresh();
       const status = music.current();
-      let picks = {};
-      try {
-        picks = JSON.parse(fs.readFileSync(path.join(__dirname, 'daily-music.local.json'), 'utf8'));
-      } catch { /* A previously generated list is optional. */ }
-      sendJson(response, 200, { ...picks, ...status });
+      sendJson(response, 200, status);
       return;
     }
     if (pathname === '/api/news' && request.method === 'GET') {
@@ -120,7 +134,7 @@ function createPlannerServer(directory, code) {
       response.writeHead(200, {
         'Content-Type': type + '; charset=utf-8',
         'Cache-Control': 'no-cache',
-        'Content-Security-Policy': "default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'",
+        'Content-Security-Policy': "default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; frame-src https://www.openstreetmap.org; connect-src 'self' https://tr.wikipedia.org https://en.wikipedia.org; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'",
       });
       if (request.method === 'HEAD') response.end();
       else fs.createReadStream(path.join(__dirname, name)).on('error', () => response.destroy()).pipe(response);

@@ -74,11 +74,11 @@ function bookDetails(book) {
     <details class="books-section"><summary>Okuma geçmişi · ${sessions.length} oturum · ${sessions.reduce((sum,s) => sum+s.minutes,0)} dakika</summary>
     ${sessions.length ? `<ul class="books-log">${[...sessions].reverse().map(s => `<li>${escapeText(s.day)} · ${s.from}–${s.page}. sayfa · ${s.minutes} dk</li>`).join('')}</ul>` : empty('Henüz okuma oturumu yok.')}</details></div></section>
     <section class="panel page-panel">${panelHeading('Alıntılar ve notlar')}
-    <div class="books-body"><form id="book-note-form" class="sync-form">
+    <div class="books-body"><details class="book-note-entry"><summary>Alıntı veya not ekle</summary><form id="book-note-form" class="sync-form">
     ${field('Tür', '<select name="kind"><option value="note">Kişisel not</option><option value="quote">Alıntı</option></select>')}
     ${bookInput('Sayfa (isteğe bağlı)', 'page', '', `type="number" min="1" max="${book.total || 100000}" step="1"`)}
     ${field('Metin', '<textarea name="text" rows="3" maxlength="5000" required></textarea>')}
-    <button class="button primary" type="submit">Ekle</button></form>
+    <button class="button primary" type="submit">Ekle</button></form></details>
     <div class="books-notes">${notes.map(n => `<article><small class="row-meta">${n.kind === 'quote' ? 'Alıntı' : 'Not'}${n.page ? ' · Sayfa ' + n.page : ''}</small><p class="books-prose">${escapeText(n.text)}</p>
     <div class="sync-actions"><button class="button secondary" data-books="note-question" data-id="${escapeText(n.id)}">Merak kuyruğuna gönder</button><button class="button secondary" data-books="delete-note" data-id="${escapeText(n.id)}">Sil</button></div></article>`).join('') || empty('Hatırlamak istediğin bir cümleyi veya düşünceni ekle.')}</div></div></section>
     <section class="panel page-panel">${panelHeading('Bu kitap sana neyi merak ettirdi?')}

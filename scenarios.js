@@ -2,7 +2,7 @@ let scenarioCourse;
 const scenarioEstimates = new Map();
 
 function scenarioCourses() {
-  const titles = new Map(courseCatalog.map(([title]) => [courseKey(title), title]));
+  const titles = new Map(enrolledCourseNames().map((title) => [courseKey(title), title]));
   for (const entry of state.assessments) titles.set(courseKey(entry.course), canonicalCourse(entry.course));
   return titles;
 }

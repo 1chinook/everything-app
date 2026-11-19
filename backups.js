@@ -1,5 +1,8 @@
 const automaticBackupsKey = 'everything-app-backups-v1';
 const backupAuxiliaryKeys = [
+  'everything-app-language-v1',
+  'everything-app-journals-v1',
+  'everything-app-projects-v1',
   'everything-app-books-v1',
   'everything-app-curiosity-v1',
   'everything-app-fitness-v1', 'everything-app-relationship-v1',
@@ -72,21 +75,19 @@ document.addEventListener('click', event => {
   }
   if (action !== 'restore' || !validPlannerData(backup.data)) return;
   if (!window.confirm('Plan bu yedeğe geri alınsın mı? Mevcut planın da önce yedeklenecek.')) return;
-  if (!createAutomaticBackup(true, 'Geri alma öncesi')) {
-    document.querySelector('#backup-feedback').textContent = 'Mevcut plan yedeklenemedi. Önce JSON yedeğini indir.';
-    return;
-  }
   try {
-    restoreBackupExtras(backup.extra);
-    replacePlannerData(backup.data);
-    save('Yedek geri alındı.');
+    restoreLocalBackup(backup.data, backup.extra);
     location.reload();
   } catch {
     document.querySelector('#backup-feedback').textContent = 'Yedek geri alınamadı. Tarayıcı depolama alanını kontrol et.';
   }
 });
 
-function restoreBackupExtras(extra) {
+function validateBackupExtras(extra) {
+  if (extra !== undefined && (!extra || typeof extra !== 'object' || Array.isArray(extra))) throw new Error('Ek kayıtlar okunamadı.');
+  for (const key of backupAuxiliaryKeys) {
+    if (extra?.[key] != null && typeof extra[key] !== 'string') throw new Error('Ek kayıt biçimi geçersiz.');
+  }
   const entries = backupAuxiliaryKeys.filter(key => typeof extra?.[key] === 'string');
   const parsed = new Map(entries.map(key => [key, JSON.parse(extra[key])]));
   const fitness = parsed.get('everything-app-fitness-v1');
@@ -99,13 +100,32 @@ function restoreBackupExtras(extra) {
       typeof entry.day !== 'string' || (entry.day && !/^\d{4}-\d\d-\d\d$/.test(entry.day))))) throw new Error('Kişisel yedek geçersiz.');
   if (saved && (!Array.isArray(saved) || saved.some(item => typeof item !== 'string'))) throw new Error('Kaydedilenler yedeği geçersiz.');
   if (sleep && (!Array.isArray(sleep.habits) || typeof sleep.day !== 'string')) throw new Error('Uyku yedeği geçersiz.');
-  for (const key of backupAuxiliaryKeys) {
-    const value = extra?.[key];
-    if (value === null) localStorage.removeItem(key);
-    else if (typeof value === 'string') {
-      localStorage.setItem(key, value);
+}
+
+function restoreLocalBackup(data, extra, synchronize = true) {
+  validateBackupExtras(extra);
+  const original = {...state};
+  const writes = [];
+  try {
+    replacePlannerData(data);
+    const updates = [[storageKey, JSON.stringify(state)], ...backupAuxiliaryKeys
+      .filter(key => extra && Object.hasOwn(extra, key)).map(key => [key, extra[key]])];
+    for (const [key,value] of updates) {
+      const previous = localStorage.getItem(key);
+      if (value === previous) continue;
+      if (value === null) localStorage.removeItem(key);
+      else localStorage.setItem(key,value);
+      writes.push([key,previous]);
     }
+  } catch (error) {
+    Object.assign(state,original);
+    for (const [key,value] of writes.reverse()) {
+      if (value === null) localStorage.removeItem(key);
+      else localStorage.setItem(key,value);
+    }
+    throw error;
   }
+  if (synchronize) noteSyncChange();
 }
 
 setInterval(() => { createAutomaticBackup(); }, 60000);

@@ -6,66 +6,7 @@ const discoverCategories = {
   saved: 'Kaydedilenler',
 };
 
-const discoverItems = [
-  { id: 'proofs', type: 'news', title: 'Yapay zekâ matematik ispatlarını nasıl biçimselleştiriyor?', topic: 'Matematik ve yapay zekâ',
-    source: 'Quanta Magazine', date: '11 Kasım 2026', lang: 'İngilizce',
-    url: 'https://www.quantamagazine.org/update/169054/',
-    note: 'Soyut Matematik ile bilgisayar bilimleri arasında bir bağ kuruyor. Yazıda matematik dilindeki bir ispatın bilgisayarın kontrol edebileceği adımlara nasıl dönüştürüldüğüne bak.' },
-  { id: 'model-introspection', type: 'news', title: 'Yapay zekâ modelleri kendi iç durumlarını fark edebiliyor mu?', topic: 'Bilgisayar bilimi',
-    source: 'Quanta Magazine', date: '4 Kasım 2026', lang: 'İngilizce',
-    url: 'https://www.quantamagazine.org/new-research-tests-whether-ai-models-know-their-own-thoughts-20261104/',
-    note: 'Araştırmacıların bu soruyu nasıl deneysel olarak ölçmeye çalıştığını anlatıyor. Deney düzeneği ile araştırmacıların yorumunu ayrı ayrı okumaya çalış.' },
-  { id: 'four-color', type: 'news', title: 'Dört renk teoremi için yeni bir ispat', topic: 'Çizge kuramı ve algoritmalar',
-    source: 'Quanta Magazine', date: '10 Eylül 2026', lang: 'İngilizce',
-    url: 'https://www.quantamagazine.org/the-four-color-theorem-gets-a-rare-new-proof-20260910/',
-    note: 'Harita boyamanın çizge boyamaya nasıl bağlandığını ve bilgisayar destekli ispatın rolünü gör. Önce küçük bir haritayı çizgeye çevirmeyi dene.' },
-  { id: 'month-problem', type: 'study', title: 'Ayın Matematik Sorusu', topic: 'Problem çözme',
-    source: 'TÜBİTAK Bilim Genç', date: 'Kasım 2026', lang: 'Türkçe',
-    url: 'https://bilimgenc.tubitak.gov.tr/makale/ayin-matematik-sorusu-kasim-2026',
-    note: 'Ders çalışmaya kısa bir ara verdiğinde çözebileceğin bir problem. Küçük örneklerden bir örüntü çıkarıp sonucu ispatlamayı dene.' },
-  { id: 'dijkstra', type: 'wiki', title: 'Dijkstra algoritması', topic: 'Algoritmalar',
-    source: 'Vikipedi', lang: 'Türkçe', url: 'https://tr.wikipedia.org/wiki/Dijkstra_algoritmas%C4%B1',
-    note: 'Bir çizgede en kısa yolun adım adım nasıl bulunduğunu gör. Küçük bir örnek çizip öncelik kuyruğunda hangi tepenin sıradaki olduğunu takip et.' },
-  { id: 'newton', type: 'wiki', title: 'Newton yöntemi', topic: 'Nümerik Analiz 1',
-    source: 'Wikipedia', lang: 'İngilizce', url: 'https://en.wikipedia.org/wiki/Newton%27s_method',
-    note: 'Kök bulma formülünü teğet üzerinden anlamlandır. Başlangıç noktasını değiştirerek yakınsamanın nasıl etkilendiğini iki örnekte karşılaştır.' },
-  { id: 'topology', type: 'wiki', title: 'Topolojik uzay', topic: 'Topoloji 1',
-    source: 'Wikipedia', lang: 'İngilizce', url: 'https://en.wikipedia.org/wiki/Topological_space',
-    note: 'Açık kümelerden başlayarak topoloji aksiyomlarını örneklerle gör. Ayrık topoloji başlığındaki örneği üç elemanlı bir kümede yaz.' },
-  { id: 'group', type: 'wiki', title: 'Grup', topic: 'Soyut Cebir 1',
-    source: 'Wikipedia', lang: 'İngilizce', url: 'https://en.wikipedia.org/wiki/Group_(mathematics)',
-    note: 'Grup aksiyomlarını simetri örnekleri üzerinden gözden geçir. Bir işlem tablosunda birim elemanı ve tersleri bulmayı dene.' },
-  { id: 'induction', type: 'wiki', title: 'Matematiksel tümevarım', topic: 'Soyut Matematik 1',
-    source: 'Wikipedia', lang: 'İngilizce', url: 'https://en.wikipedia.org/wiki/Mathematical_induction',
-    note: 'Başlangıç ve tümevarım adımlarının rollerini ayır. Ardından ilk n tek sayının toplamını aynı yöntemle ispatla.' },
-  { id: 'cauchy-riemann', type: 'wiki', title: 'Cauchy–Riemann denklemleri', topic: 'Kompleks Analiz',
-    source: 'Wikipedia', lang: 'İngilizce', url: 'https://en.wikipedia.org/wiki/Cauchy%E2%80%93Riemann_equations',
-    note: 'Bir kompleks fonksiyonun gerçek ve sanal parçaları üzerinden türev koşullarını incele. Bir örnekte kısmi türevleri kendin hesapla.' },
-  { id: 'recurrence', type: 'wiki', title: 'Yineleme bağıntıları', topic: 'Fark Denklemleri 1',
-    source: 'Wikipedia', lang: 'İngilizce', url: 'https://en.wikipedia.org/wiki/Recurrence_relation',
-    note: 'Başlangıç koşulu ile bir dizinin kurallı biçimde üretilmesini incele. Bir doğrusal bağıntının ilk terimlerini yazıp kapalı formuyla karşılaştır.' },
-  { id: 'frenet', type: 'wiki', title: 'Frenet–Serret formülleri', topic: 'Diferansiyel Geometri',
-    source: 'Wikipedia', lang: 'İngilizce', url: 'https://en.wikipedia.org/wiki/Frenet%E2%80%93Serret_formulas',
-    note: 'Teğet, normal ve binormal vektörlerin eğri boyunca nasıl değiştiğine bak. Çember üzerinde eğrilik ve burulmayı hesaplayarak formülleri kontrol et.' },
-  { id: 'conics', type: 'wiki', title: 'Konik kesitler', topic: 'Analitik Geometri',
-    source: 'Wikipedia', lang: 'İngilizce', url: 'https://en.wikipedia.org/wiki/Conic_section',
-    note: 'Elips, parabol ve hiperbolü yalnız denklemlerinden değil, geometrik tanımlarından da karşılaştır.' },
-  { id: 'model', type: 'wiki', title: 'Matematiksel model', topic: 'Uygulamalı Matematik',
-    source: 'Wikipedia', lang: 'İngilizce', url: 'https://en.wikipedia.org/wiki/Mathematical_model',
-    note: 'Bir problemi modellemeden önce hangi değişkenleri ve varsayımları seçtiğini yaz. Sayfadaki örneklerden birinde bu ayrımı uygula.' },
-  { id: 'chernobyl', type: 'wiki', title: 'Çernobil faciası', topic: 'Bilim tarihi',
-    source: 'Vikipedi', lang: 'Türkçe', url: 'https://tr.wikipedia.org/wiki/%C3%87ernobil_Facias%C4%B1',
-    note: 'Kaza zaman çizelgesini ve santralin sonrasını birlikte ele almak için başlangıç. Teknik ayrıntıları okurken birincil kaynaklara verilen bağlantıları da takip et.' },
-  { id: 'mit-algorithms', type: 'study', title: 'Algoritmalara Giriş', topic: 'Algoritmalar',
-    source: 'MIT OpenCourseWare', lang: 'İngilizce', url: 'https://ocw.mit.edu/courses/6-006-introduction-to-algorithms-fall-2011/',
-    note: 'Graf taraması, en kısa yollar ve dinamik programlama için ders videoları, notlar ve problemler. Sınavındaki konuyla eşleşen haftadan başla.' },
-  { id: 'mit-ode', type: 'study', title: 'Diferansiyel Denklemler', topic: 'Diferansiyel Denklemler 1',
-    source: 'MIT OpenCourseWare', lang: 'İngilizce', url: 'https://ocw.mit.edu/courses/18-03sc-differential-equations-fall-2011/',
-    note: 'Video, çalışma notu ve alıştırma içeren açık ders. Birinci mertebe denklemler ya da Laplace dönüşümü için ilgili bölümü aç.' },
-  { id: 'iaea', type: 'study', title: 'Çernobil kazası hakkında IAEA dosyası', topic: 'Bilim tarihi',
-    source: 'Uluslararası Atom Enerjisi Ajansı', lang: 'İngilizce', url: 'https://www.iaea.org/topics/chornobyl',
-    note: 'Kaza hakkındaki teknik raporlara ve kurumsal değerlendirmelere ulaşmak için Vikipedi okumasının ardından kullan.' },
-];
+const discoverItems = [];
 
 const discoverFeeds = [
   ['TÜBİTAK Bilim Genç', 'Türkçe bilim, teknoloji ve matematik', 'https://bilimgenc.tubitak.gov.tr/'],
@@ -179,7 +120,6 @@ function discoverPage() {
   const items = discoverCatalog();
   const count = items.filter(discoverMatches).length;
   return `${intro('Keşfet', 'Matematik ve bilgisayar bilimi önde, farklı alanlardan günlük haberler.')}
-    ${curiosityPanel()}
     <div id="discover-content">
       <section class="panel discover-feeds" aria-labelledby="discover-feed-heading">
         <div><h2 id="discover-feed-heading">Günlük haber akışı</h2><p id="discover-news-status" role="status">${escapeText(newsStatus())}</p>
@@ -194,7 +134,7 @@ function discoverPage() {
         <div class="discover-catalog-heading">
           <h2 id="discover-catalog-heading">Okuma seçkisi</h2>
           <label class="field discover-search" for="discover-query"><span>Ders, konu veya kaynak ara</span>
-            <input id="discover-query" type="search" value="${escapeText(discoverQuery)}" placeholder="Örn. Topoloji" autocomplete="off">
+            <input id="discover-query" type="search" value="${escapeText(discoverQuery)}" placeholder="Konu ara" autocomplete="off">
           </label>
         </div>
         <div class="discover-toolbar">
