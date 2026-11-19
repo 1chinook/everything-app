@@ -14,7 +14,7 @@ function backupFixture() {
       setItem(k,v){if(k===key && v.includes('full'))throw Error('quota');store.set(k,v)}
     }
   });
-  vm.runInContext(fs.readFileSync('backups.js','utf8'),ctx);
+  vm.runInContext(fs.readFileSync(require.resolve('../src/modules/backups.js'),'utf8'),ctx);
   return {ctx,store,state,key};
 }
 test('a failed auxiliary write rolls back the plan in storage and in memory',()=>{

@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync(require.resolve('./fitness.js'),'utf8');
+const source = fs.readFileSync(require.resolve('../src/modules/fitness.js'),'utf8');
 const storageKey = 'everything-app-fitness-v1';
 
 function screen(storage) {

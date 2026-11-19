@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $nodePath = (Get-Command node.exe -ErrorAction Stop).Source
-$workerPath = Join-Path $PSScriptRoot 'refresh-daily.js'
+$workerPath = Join-Path $PSScriptRoot 'src\server\refresh-daily.js'
 $command = "& '" + $nodePath.Replace("'", "''") + "' '" + $workerPath.Replace("'", "''") + "'"
 $payload = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
 $powershellPath = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'

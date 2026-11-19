@@ -5,9 +5,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { randomBytes, timingSafeEqual } = require('node:crypto');
-const { validPlannerData } = require('./sync.js');
-const { createNewsReader } = require('./news.js');
-const { createSpotifyMusic } = require('./spotify-music.js');
+const { validPlannerData } = require('./src/modules/sync.js');
+const { createNewsReader } = require('./src/server/news.js');
+const { createSpotifyMusic } = require('./src/server/spotify-music.js');
 
 const assets = new Map([
   ['/app-icon-192.png', ['app-icon-192.png', 'image/png']],
@@ -17,21 +17,21 @@ const assets = new Map([
   ['/app-icon.svg', ['app-icon.svg', 'image/svg+xml']],
   ['/', ['index.html', 'text/html']],
   ['/index.html', ['index.html', 'text/html']],
-  ['/styles.css', ['styles.css', 'text/css']],
-  ['/fitness.css', ['fitness.css', 'text/css']],
-  ['/discover.css', ['discover.css', 'text/css']],
+  ['/styles.css', ['src/styles/styles.css', 'text/css']],
+  ['/fitness.css', ['src/styles/fitness.css', 'text/css']],
+  ['/discover.css', ['src/styles/discover.css', 'text/css']],
   ['/app.js', ['app.js', 'text/javascript']],
-  ['/planner.js', ['planner.js', 'text/javascript']],
-  ['/courses.js', ['courses.js', 'text/javascript']],
-  ['/sync.js', ['sync.js', 'text/javascript']],
-  ['/fitness.js', ['fitness.js', 'text/javascript']],
-  ['/discover.js', ['discover.js', 'text/javascript']],
-  ['/personal.js', ['personal.js', 'text/javascript']],
-  ['/scenarios.js', ['scenarios.js', 'text/javascript']],
-  ['/daily.js', ['daily.js', 'text/javascript']],
-  ['/backups.js', ['backups.js', 'text/javascript']],
-  ['/materials.js', ['materials.js', 'text/javascript']],
-  ['/materials.css', ['materials.css', 'text/css']],
+  ['/planner.js', ['src/modules/planner.js', 'text/javascript']],
+  ['/courses.js', ['src/modules/courses.js', 'text/javascript']],
+  ['/sync.js', ['src/modules/sync.js', 'text/javascript']],
+  ['/fitness.js', ['src/modules/fitness.js', 'text/javascript']],
+  ['/discover.js', ['src/modules/discover.js', 'text/javascript']],
+  ['/personal.js', ['src/modules/personal.js', 'text/javascript']],
+  ['/scenarios.js', ['src/modules/scenarios.js', 'text/javascript']],
+  ['/daily.js', ['src/modules/daily.js', 'text/javascript']],
+  ['/backups.js', ['src/modules/backups.js', 'text/javascript']],
+  ['/materials.js', ['src/modules/materials.js', 'text/javascript']],
+  ['/materials.css', ['src/styles/materials.css', 'text/css']],
   ['/vendor/pdf.mjs', ['vendor/pdf.mjs', 'text/javascript']],
   ['/vendor/pdf.worker.mjs', ['vendor/pdf.worker.mjs', 'text/javascript']],
 ]);

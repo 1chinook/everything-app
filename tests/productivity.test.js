@@ -2,11 +2,12 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const vm=require('node:vm');
 const fs=require('node:fs');
-const {validPlannerData}=require('./sync.js');
+const path=require('node:path');
+const {validPlannerData}=require('../src/modules/sync.js');
 function fixture(){
  const handlers={};
  const context=vm.createContext({console, document:{addEventListener:(name,fn)=>{(handlers[name]??=[]).push(fn);}},window:{addEventListener(){}},localStorage:{getItem(){return null;}},state:{topicReviews:[],reflections:{},topicMastery:{},tasks:[],assessments:[],documents:[],planning:{breakMinutes:10}},enrolledCourseNames:()=>['Örnek Ders'],courseCatalog:[['Örnek Ders',['Ünite A']]],topicsForCourse:()=>['Ünite A'],activeDay:()=> '2030-11-19',nowMinutes:()=>600,clockMinutes:s=>Number(s.slice(0,2))*60+Number(s.slice(3)),clockLabel:n=>`${Math.floor(n/60)}:${n%60}`,eventsForDay:()=>[],coursePriorities:()=>[],projectRecords:[],bookRecords:[],journalRecords:[],curiosityData:{questions:[],routes:[]},dateFor:d=>new Date(d+'T12:00:00Z'),shiftDay:(d,n)=>{let date=new Date(d+'T12:00:00Z');date.setUTCDate(date.getUTCDate()+n);return date.toISOString().slice(0,10);},escapeText:s=>String(s).replaceAll('<','&lt;'),topicMastery:()=> 'unknown',orderedTopics:(_,t)=>t,courseKey:c=>'course:'+c,selectedDay:'2030-11-19',newId:()=> 'new-task',save(){},render(){},FormData:class{constructor(form){this.data=form.data;}get(k){return this.data[k]??'';}getAll(k){return this.data[k]??[];}}});
- vm.runInContext(fs.readFileSync('productivity.js','utf8'),context);
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'..','src','modules','productivity.js'),'utf8'),context);
  return {context,handlers,run:s=>vm.runInContext(s,context)};
 }
 test('hard reviews reset spacing while easy reviews expand it',()=>{
@@ -75,7 +76,7 @@ test('daily controls show real activity duration and complete another visible st
  Object.assign(f.context,{fitnessData:{activities:[{day:'2030-11-19',minutes:0.5,kcal:3}]},panelHeading:()=>'',durationText:()=> '30 sn'});
  Object.assign(f.context.state,{events:[{id:'s',kind:'study',day:'2030-11-20'}],dailyChecks:{},sleep:{duration:8}});
  f.context.document.querySelector=()=>null;
- vm.runInContext(fs.readFileSync('daily.js','utf8'),f.context);
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'..','src','modules','daily.js'),'utf8'),f.context);
  assert.match(f.run('dailyControls()'),/1 hareket · 30 sn/);
  assert.doesNotMatch(f.run('dailyControls()'),/data-daily-check="steps"/);
  f.handlers.change.at(-1)({target:{dataset:{dailyStudy:'s'},checked:true}});
