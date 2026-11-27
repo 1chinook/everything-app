@@ -204,7 +204,7 @@ if (require.main === module) {
   const lan = process.argv.includes('--lan');
   const directory = process.env.EVERYTHING_APP_DATA_DIR ?? path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'EverythingApp');
   const code = randomBytes(18).toString('base64url');
-  const port = 4173;
+  const port = Number(process.env.PORT || 4173);
   const server = createPlannerServer(directory, code);
   server.on('error', error => {
     console.error('Sunucu açılamadı:', error.message);
